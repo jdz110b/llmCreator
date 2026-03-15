@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% block title %}{{ corpus.original_name }} - 语料评测平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4>
+            <i class="bi bi-file-earmark-text"></i> {{ corpus.original_name }}
+            {% if corpus.corpus_type == 'question' %}
+            <span class="badge bg-info">Question</span>
+            {% else %}
+            <span class="badge bg-success">QA对</span>
+            {% endif %}
+        </h4>
+        <small class="text-muted">
+            共 {{ corpus.record_count }} 条语料 |
+            格式: {{ corpus.file_type|upper }} |
+            上传时间: {{ corpus.created_at.strftime('%Y-%m-%d %H:%M') }}
+        </small>
+    </div>
+    <div>
+        <a href="/api/export/{{ corpus.id }}" class="btn btn-outline-success">
+            <i class="bi bi-download"></i> 导出结果
+        </a>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回
+        </a>
+    </div>
+</div>
+
+<!-- 操作面板 -->
+<div class="card mb-3">
+    <div class="card-header">
+        <h5><i class="bi bi-tools"></i> 评测操作</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <!-- 选择模型 -->
+            <div class="col-md-3">
+                <label class="form-label">选择大模型</label>
+                <select id="config-select" class="form-select" onchange="rememberConfig(this.value)">
+                    {% for config in configs %}
+                    <option value="{{ config.id }}">
+                        {{ config.name }} ({{ config.model }})
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if not configs %}
+                <div class="form-text text-danger">请先 <a href="/config">配置大模型</a></div>
+                {% endif %}
+            </div>
+
+            <!-- 分类操作 - 多选 -->
+            <div class="col-md-9">
+                <label class="form-label">选择要执行的操作（可多选）</label>
+                <div class="d-flex flex-wrap gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="subj_obj" id="op-subj-obj">
+                        <label class="form-check-label" for="op-subj-obj">
+                            <i class="bi bi-diagram-2 text-primary"></i> 主观/客观分类
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="difficulty" id="op-difficulty">
+                        <label class="form-check-label" for="op-difficulty">
+                            <i class="bi bi-bar-chart-steps text-warning"></i> 难度等级分类
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="quality" id="op-quality">
+                        <label class="form-check-label" for="op-quality">
+                            <i class="bi bi-clipboard-check text-secondary"></i> 质量评估
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="domain" id="op-domain">
+                        <label class="form-check-label" for="op-domain">
+                            <i class="bi bi-globe text-dark"></i> 领域分类
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="intent" id="op-intent">
+                        <label class="form-check-label" for="op-intent">
+                            <i class="bi bi-bullseye" style="color:#6f42c1;"></i> 意图识别
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="category" id="op-category">
+                        <label class="form-check-label" for="op-category">
+                            <i class="bi bi-tags text-info"></i> 自定义分类
+                        </label>
+                    </div>
+                    {% if corpus.corpus_type == 'qa' %}
+                    <div class="form-check">
+                        <input class="form-check-input op-check" type="checkbox" value="score" id="op-score">
+                        <label class="form-check-label" for="op-score">
+                            <i class="bi bi-star text-success"></i> Answer 打分
+                        </label>
+                    </div>
+                    {% endif %}
+                </div>
+                <!-- 自定义分类输入框，勾选时显示 -->
+                <div id="category-input-row" class="mt-2 d-none" style="max-width: 500px;">
+                    <input type="text" id="custom-categories" class="form-control form-control-sm"
+                           placeholder="输入分类类型，逗号分隔，如: 数学,物理,化学">
+                </div>
+                <div class="mt-3 d-flex gap-2 align-items-center">
+                    <button class="btn btn-primary" onclick="runBatchOperations()">
+                        <i class="bi bi-play-fill"></i> 执行选中操作
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAllOps(true)">全选</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAllOps(false)">全不选</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prompt 选择（可选） -->
+        <div class="row mt-3">
+            <div class="col-md-4">
+                <label class="form-label">选择 Prompt 模板（可选）</label>
+                <select id="prompt-select" class="form-select">
+                    <option value="">使用默认 Prompt</option>
+                    {% for prompt in prompts %}
+                    <option value="{{ prompt.id }}">{{ prompt.name }} ({{ prompt.prompt_type }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- 进度条 -->
+        <div id="task-progress" class="mt-3 d-none">
+            <div class="progress">
+                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                     style="width: 100%"></div>
+            </div>
+            <p id="progress-text" class="text-center mt-1">处理中...</p>
+        </div>
+    </div>
+</div>
+
+<!-- 语料数据表格 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-table"></i> 语料数据</h5>
+        <div>
+            <button class="btn btn-sm btn-outline-primary" onclick="selectAll()">全选</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll()">取消全选</button>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th width="40"><input type="checkbox" id="select-all-cb" onchange="toggleAll(this)"></th>
+                        <th width="50">ID</th>
+                        <th>问题</th>
+                        {% if corpus.corpus_type == 'qa' %}
+                        <th>答案</th>
+                        {% endif %}
+                        <th width="80">主观/客观</th>
+                        <th width="70">难度</th>
+                        <th width="100">分类</th>
+                        <th>客观题答案</th>
+                        <th width="70">质量</th>
+                        <th width="100">领域</th>
+                        <th width="100">意图</th>
+                        {% if corpus.corpus_type == 'qa' %}
+                        <th width="60">评分</th>
+                        <th>评分理由</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td><input type="checkbox" class="item-cb" value="{{ item.id }}"></td>
+                        <td>{{ loop.index }}</td>
+                        <td class="text-truncate" style="max-width: 300px;" title="{{ item.question }}">
+                            {{ item.question }}
+                        </td>
+                        {% if corpus.corpus_type == 'qa' %}
+                        <td class="text-truncate" style="max-width: 200px;" title="{{ item.answer }}">
+                            {{ item.answer }}
+                        </td>
+                        {% endif %}
+                        <td>
+                            {% if item.subj_obj == 'objective' %}
+                            <span class="badge bg-primary">客观</span>
+                            {% elif item.subj_obj == 'subjective' %}
+                            <span class="badge bg-warning">主观</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.difficulty == 'L1' %}
+                            <span class="badge bg-success">L1(简单)</span>
+                            {% elif item.difficulty == 'L2' %}
+                            <span class="badge bg-warning">L2(中等)</span>
+                            {% elif item.difficulty == 'L3' %}
+                            <span class="badge bg-danger">L3(困难)</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.category or '-' }}</td>
+                        <td class="text-truncate" style="max-width: 200px;" title="{{ item.objective_answer }}">
+                            {{ item.objective_answer or '-' }}
+                        </td>
+                        <td>
+                            {% if item.quality_score is not none and item.quality_score %}
+                            <span class="badge {% if item.quality_label == 'high' %}bg-success{% elif item.quality_label == 'medium' %}bg-warning{% else %}bg-danger{% endif %}"
+                                  title="质量评分: {{ item.quality_score }}">
+                                {{ item.quality_score }}/{{ item.quality_label }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.domain %}
+                            <span title="{{ item.sub_domain or '' }}">{{ item.domain }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.intent_cn %}
+                            <span class="badge bg-secondary" title="置信度: {{ item.intent_confidence }}">
+                                {{ item.intent_cn }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        {% if corpus.corpus_type == 'qa' %}
+                        <td>
+                            {% if item.answer_score is not none %}
+                            <span class="badge {% if item.answer_score >= 7 %}bg-success{% elif item.answer_score >= 4 %}bg-warning{% else %}bg-danger{% endif %}">
+                                {{ item.answer_score }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-truncate" style="max-width: 200px;" title="{{ item.score_reason }}">
+                            {{ item.score_reason or '-' }}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FILE_ID = {{ corpus.id }};
+const CONFIG_STORAGE_KEY = 'corpus_eval_selected_config';
+
+// === 初始化：恢复上次选择的模型 ===
+(function restoreConfig() {
+    var saved = localStorage.getItem(CONFIG_STORAGE_KEY);
+    var select = document.getElementById('config-select');
+    if (saved && select) {
+        for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === saved) {
+                select.value = saved;
+                break;
+            }
+        }
+    }
+})();
+
+function rememberConfig(val) {
+    localStorage.setItem(CONFIG_STORAGE_KEY, val);
+}
+
+// === 自定义分类输入框联动 ===
+document.getElementById('op-category').addEventListener('change', function() {
+    document.getElementById('category-input-row').classList.toggle('d-none', !this.checked);
+});
+
+function toggleAllOps(checked) {
+    document.querySelectorAll('.op-check').forEach(function(cb) {
+        if (cb.value === 'category') {
+            cb.checked = false;
+        } else {
+            cb.checked = checked;
+        }
+    });
+    document.getElementById('category-input-row').classList.add('d-none');
+}
+
+// === 语料行选择 ===
+function getSelectedIds() {
+    var cbs = document.querySelectorAll('.item-cb:checked');
+    return Array.from(cbs).map(function(cb) { return parseInt(cb.value); });
+}
+
+function toggleAll(el) {
+    document.querySelectorAll('.item-cb').forEach(function(cb) { cb.checked = el.checked; });
+}
+
+function selectAll() {
+    document.querySelectorAll('.item-cb').forEach(function(cb) { cb.checked = true; });
+    document.getElementById('select-all-cb').checked = true;
+}
+
+function deselectAll() {
+    document.querySelectorAll('.item-cb').forEach(function(cb) { cb.checked = false; });
+    document.getElementById('select-all-cb').checked = false;
+}
+
+// === 进度 ===
+function showProgress(text) {
+    var el = document.getElementById('task-progress');
+    el.classList.remove('d-none');
+    document.getElementById('progress-text').textContent = text || '处理中...';
+}
+
+function hideProgress() {
+    document.getElementById('task-progress').classList.add('d-none');
+}
+
+// === 批量执行选中的操作 ===
+function runBatchOperations() {
+    var configId = document.getElementById('config-select').value;
+    if (!configId) { showAlert('请先选择大模型', 'danger'); return; }
+
+    var checkedOps = [];
+    document.querySelectorAll('.op-check:checked').forEach(function(cb) {
+        checkedOps.push(cb.value);
+    });
+
+    if (checkedOps.length === 0) {
+        showAlert('请至少选择一个操作', 'danger');
+        return;
+    }
+
+    var categories = document.getElementById('custom-categories').value;
+    if (checkedOps.indexOf('category') !== -1 && !categories.trim()) {
+        showAlert('自定义分类需要输入分类类型', 'danger');
+        return;
+    }
+
+    var selectedIds = getSelectedIds();
+    var promptId = document.getElementById('prompt-select').value;
+
+    // 分离 score 和分类操作
+    var classifyOps = [];
+    var hasScore = false;
+    checkedOps.forEach(function(op) {
+        if (op === 'score') {
+            hasScore = true;
+        } else {
+            classifyOps.push(op);
+        }
+    });
+
+    // 分类操作合并为一次 combined 调用（每个 Question 只调一次 LLM）
+    var tasks = [];
+    var totalOps = (classifyOps.length > 0 ? 1 : 0) + (hasScore ? 1 : 0);
+    var completedOps = 0;
+    var allErrors = [];
+
+    showProgress('正在执行...');
+
+    function updateProgress() {
+        completedOps++;
+        document.getElementById('progress-text').textContent =
+            '正在执行 ' + completedOps + '/' + totalOps + ' 个操作...';
+    }
+
+    function onAllDone() {
+        hideProgress();
+        var opNames = classifyOps.length > 0 ? classifyOps.join('+') : '';
+        if (hasScore) opNames += (opNames ? '+' : '') + '打分';
+        var msg = '操作完成 (' + opNames + ')';
+        if (allErrors.length > 0) {
+            msg += ', ' + allErrors.length + ' 条处理失败';
+        }
+        showAlert(msg, allErrors.length > 0 ? 'warning' : 'success');
+        setTimeout(function() { location.reload(); }, 1000);
+    }
+
+    if (classifyOps.length > 0) {
+        tasks.push(function() {
+            // 多个分类操作合并为一次 combined 调用
+            return fetch('/api/classify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    file_id: FILE_ID,
+                    config_id: parseInt(configId),
+                    classify_type: 'combined',
+                    classify_types: classifyOps,
+                    categories: categories,
+                    prompt_id: promptId ? parseInt(promptId) : null,
+                    item_ids: selectedIds.length > 0 ? selectedIds : [],
+                }),
+            }).then(function(r) { return r.json(); })
+            .then(function(data) {
+                updateProgress();
+                if (data.errors) allErrors = allErrors.concat(data.errors);
+            });
+        });
+    }
+
+    if (hasScore) {
+        tasks.push(function() {
+            return fetch('/api/score', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    file_id: FILE_ID,
+                    config_id: parseInt(configId),
+                    prompt_id: promptId ? parseInt(promptId) : null,
+                    item_ids: selectedIds.length > 0 ? selectedIds : [],
+                }),
+            }).then(function(r) { return r.json(); })
+            .then(function(data) {
+                updateProgress();
+                if (data.errors) allErrors = allErrors.concat(data.errors);
+            });
+        });
+    }
+
+    // 串行执行
+    var chain = Promise.resolve();
+    tasks.forEach(function(task) {
+        chain = chain.then(task);
+    });
+    chain.then(onAllDone).catch(function(err) {
+        hideProgress();
+        showAlert('操作失败: ' + err.message, 'danger');
+    });
+}
+</script>
+{% endblock %}

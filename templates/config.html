@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}配置管理 - 语料评测平台{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 大模型配置 -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-cpu"></i> 大模型配置</h5>
+            </div>
+            <div class="card-body">
+                <form id="llm-config-form">
+                    <div class="mb-3">
+                        <label class="form-label">配置名称</label>
+                        <input type="text" name="name" class="form-control" placeholder="例如: GPT-4o, Qwen-Max" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">API URL</label>
+                        <input type="url" name="api_url" class="form-control"
+                               placeholder="例如: https://api.openai.com/v1" required>
+                        <div class="form-text">兼容 OpenAI Chat Completion API 格式</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">API Key</label>
+                        <input type="password" name="api_key" class="form-control" placeholder="sk-..." required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">模型名称</label>
+                        <input type="text" name="model" class="form-control" placeholder="例如: gpt-4o, qwen-max" required>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" name="is_default" class="form-check-input" id="is-default">
+                        <label class="form-check-label" for="is-default">设为默认模型</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save"></i> 保存配置
+                    </button>
+                </form>
+
+                <!-- 已有配置列表 -->
+                <hr>
+                <h6>已有配置</h6>
+                {% if configs %}
+                <div class="list-group">
+                    {% for config in configs %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ config.name }}</strong>
+                            {% if config.is_default %}
+                            <span class="badge bg-primary ms-1">默认</span>
+                            {% endif %}
+                            <br>
+                            <small class="text-muted">{{ config.model }} | {{ config.api_url[:40] }}...</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-info" onclick="testConfig({{ config.id }})">
+                                <i class="bi bi-lightning"></i> 测试
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteConfig({{ config.id }})">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">暂无配置</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt 模板管理 -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-chat-left-text"></i> Prompt 模板管理</h5>
+            </div>
+            <div class="card-body">
+                <form id="prompt-form">
+                    <div class="mb-3">
+                        <label class="form-label">模板名称</label>
+                        <input type="text" name="name" class="form-control" placeholder="例如: 自定义分类Prompt" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">模板类型</label>
+                        <select name="prompt_type" class="form-select" required>
+                            <option value="classify_subj_obj">主观/客观分类</option>
+                            <option value="classify_difficulty">难度等级分类</option>
+                            <option value="classify_category">自定义分类</option>
+                            <option value="generate_answer">客观题答案生成</option>
+                            <option value="score_answer">Answer 打分</option>
+                            <option value="quality_eval">语料质量评估</option>
+                            <option value="domain_classify">领域/场景分类</option>
+                            <option value="intent_classify">意图识别分类</option>
+                            <option value="combined_classify">综合分类(一次调用)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Prompt 内容</label>
+                        <textarea name="content" class="form-control" rows="8"
+                                  placeholder="使用 {question} 表示问题占位符，{answer} 表示答案占位符，{categories} 表示分类列表占位符" required></textarea>
+                        <div class="form-text">
+                            可用占位符: <code>{question}</code> <code>{answer}</code> <code>{categories}</code>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save"></i> 添加模板
+                    </button>
+                </form>
+
+                <hr>
+                <h6>已有模板</h6>
+                <div class="accordion" id="prompt-accordion">
+                    {% for prompt in prompts %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#prompt-{{ prompt.id }}">
+                                {{ prompt.name }}
+                                {% if prompt.is_default %}
+                                <span class="badge bg-secondary ms-2">默认</span>
+                                {% endif %}
+                                <span class="badge bg-info ms-2">{{ prompt.prompt_type }}</span>
+                            </button>
+                        </h2>
+                        <div id="prompt-{{ prompt.id }}" class="accordion-collapse collapse"
+                             data-bs-parent="#prompt-accordion">
+                            <div class="accordion-body">
+                                <textarea class="form-control mb-2" rows="6" id="prompt-content-{{ prompt.id }}">{{ prompt.content }}</textarea>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary" onclick="updatePrompt({{ prompt.id }}, '{{ prompt.name }}')">
+                                        <i class="bi bi-save"></i> 保存修改
+                                    </button>
+                                    {% if not prompt.is_default %}
+                                    <button class="btn btn-sm btn-danger" onclick="deletePrompt({{ prompt.id }})">
+                                        <i class="bi bi-trash"></i> 删除
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 保存 LLM 配置
+document.getElementById('llm-config-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        api_url: formData.get('api_url'),
+        api_key: formData.get('api_key'),
+        model: formData.get('model'),
+        is_default: formData.get('is_default') === 'on',
+    };
+    fetch('/api/llm-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) showAlert(data.error, 'danger');
+        else { showAlert(data.message, 'success'); setTimeout(() => location.reload(), 500); }
+    });
+});
+
+function testConfig(id) {
+    showAlert('正在测试连接...', 'info');
+    fetch('/api/llm-config/' + id + '/test', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) showAlert(data.error, 'danger');
+            else showAlert(data.message + ': ' + data.response, 'success');
+        })
+        .catch(err => showAlert('测试失败: ' + err.message, 'danger'));
+}
+
+function deleteConfig(id) {
+    if (!confirm('确定要删除这个配置吗？')) return;
+    fetch('/api/llm-config/' + id, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 500);
+        });
+}
+
+// 保存 Prompt 模板
+document.getElementById('prompt-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        prompt_type: formData.get('prompt_type'),
+        content: formData.get('content'),
+    };
+    fetch('/api/prompt', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) showAlert(data.error, 'danger');
+        else { showAlert(data.message, 'success'); setTimeout(() => location.reload(), 500); }
+    });
+});
+
+function updatePrompt(id, name) {
+    const content = document.getElementById('prompt-content-' + id).value;
+    fetch('/api/prompt/' + id, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name: name, content: content }),
+    })
+    .then(r => r.json())
+    .then(data => showAlert(data.message || data.error, data.error ? 'danger' : 'success'));
+}
+
+function deletePrompt(id) {
+    if (!confirm('确定要删除这个模板吗？')) return;
+    fetch('/api/prompt/' + id, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            showAlert(data.message || data.error, data.error ? 'danger' : 'success');
+            if (!data.error) setTimeout(() => location.reload(), 500);
+        });
+}
+</script>
+{% endblock %}

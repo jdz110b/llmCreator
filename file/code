@@ -1,0 +1,1508 @@
+{
+  "schemaType": "superform",
+  "schemaVersion": "4.3",
+  "pages": [
+    {
+      "id": "FORM-d2351383-a842-4f8f-b18f-0195684e9aab",
+      "componentsMap": [
+        {
+          "componentName": "TextField",
+          "package": "@ali/vc-text-field"
+        },
+        {
+          "componentName": "TextareaField",
+          "package": "@ali/vc-textarea-field"
+        },
+        {
+          "componentName": "NumberField",
+          "package": "@ali/vc-number-field"
+        },
+        {
+          "componentName": "AttachmentField",
+          "package": "@ali/vc-attachment-field"
+        },
+        {
+          "componentName": "Link",
+          "package": "@ali/vc-link"
+        },
+        {
+          "componentName": "LinkBlock",
+          "package": "@ali/vc-link-block"
+        },
+        {
+          "componentName": "ColumnsLayout",
+          "package": "@ali/vc-columns-layout"
+        },
+        {
+          "componentName": "Column",
+          "package": "@ali/vc-columns-layout"
+        },
+        {
+          "componentName": "GroupLayout",
+          "package": "@ali/vc-group-layout"
+        },
+        {
+          "componentName": "Root",
+          "package": "@ali/vc-bpms-root"
+        }
+      ],
+      "layout": {
+        "componentName": "Root",
+        "id": "node_jpgkvwvj",
+        "props": {
+          "flexible": false,
+          "containerStyle": {},
+          "pageStyle": ":root {\n  background-color: #fff;\n}\n:root .kuma-button-not-trigger-events {\n    background-color: #0079F2;\n    border-color: #0079F2;\n    color: #fff;\n    display: none;\n}",
+          "willMount": "function willMount(ctx) {\n   \n}",
+          "didMount": "function didMount(ctx) {\n  setTimeout(() => {\n    const isDepositOnline = ctx.dp.getValue('processVariables').isDepositOnline;\n    const depositInfoState = ctx.store.get('DepositInfo');\n    if (isDepositOnline !== true && isDepositOnline !== 'true') {\n      depositInfoState.setBehavior('HIDDEN');\n    }\n  }, 500);\n}",
+          "willUnMount": "function willUnMount(ctx) {\n   \n}",
+          "actionSetting": "function beforeSubmit(ctx, nodeId, action, data) {\n   \n}",
+          "actionConfirmSetting": "function beforeConfirmSubmit(ctx, nodeId, action, data) {\n   \n}",
+          "afterActionSetting": "function afterSubmit(ctx, nodeId, action, data) {\n   \n}"
+        },
+        "children": [
+          {
+            "componentName": "GroupLayout",
+            "id": "node_mmlho52s",
+            "props": {
+              "title": {
+                "use": "zh_CN",
+                "en_US": "Group",
+                "zh_CN": "充值信息",
+                "type": "i18n"
+              },
+              "fieldId": "DepositInfo"
+            },
+            "children": [
+              {
+                "componentName": "TextareaField",
+                "id": "node_mmlho535",
+                "props": {
+                  "label": {
+                    "type": "i18n",
+                    "use": "zh_CN",
+                    "en_US": "Textarea Field",
+                    "zh_CN": "业务背景"
+                  },
+                  "showLabel": true,
+                  "placeholder": {
+                    "type": "i18n",
+                    "use": "zh_CN",
+                    "en_US": "Please Input",
+                    "zh_CN": "请输入"
+                  },
+                  "defaultValue": {
+                    "value": {
+                      "type": "i18n",
+                      "use": "zh_CN",
+                      "en_US": null,
+                      "zh_CN": ""
+                    }
+                  },
+                  "tips": {
+                    "zh_CN": "",
+                    "en_US": "",
+                    "type": "i18n"
+                  },
+                  "style": {
+                    "maxWidth": "446px"
+                  },
+                  "maxHeight": "",
+                  "layout": "VERTICAL",
+                  "size": "large",
+                  "defaultBehavior": {
+                    "fieldBehavior": "READONLY"
+                  },
+                  "autoTrim": false,
+                  "showCounter": false,
+                  "validation": [],
+                  "fieldId": "background",
+                  "events": {}
+                }
+              },
+              {
+                "componentName": "ColumnsLayout",
+                "id": "node_mmlho52u",
+                "props": {
+                  "layout": "8:8:8",
+                  "layoutGap": 0,
+                  "breakpoint": "xs",
+                  "display": "VERTICAL",
+                  "style": {},
+                  "fieldId": "columns_mmlho530"
+                },
+                "children": [
+                  {
+                    "componentName": "Column",
+                    "id": "node_mmlho52v",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_mmlho531",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "充值单据申请人",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [],
+                          "fieldId": "depositApplier",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "Link",
+                        "id": "node_mmlho52t",
+                        "props": {
+                          "content": {
+                            "use": "zh_CN",
+                            "en_US": "link text",
+                            "zh_CN": "充值单据及支付拆单详情",
+                            "type": "i18n"
+                          },
+                          "textOverflow": false,
+                          "link": {
+                            "href": "${processVariables.depositDetailUrl}",
+                            "type": "url",
+                            "params": [],
+                            "target": "_self"
+                          },
+                          "style": {},
+                          "fieldId": "link_deposit",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mmlho52z",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_mmlho534",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "BU财务",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "buFinance",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mmlho536",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "componentName": "GroupLayout",
+            "id": "node_m201qxv7",
+            "props": {
+              "title": {
+                "use": "zh_CN",
+                "en_US": "Group",
+                "zh_CN": "转出账户",
+                "type": "i18n"
+              },
+              "fieldId": "group_m201qxvh"
+            },
+            "children": [
+              {
+                "componentName": "ColumnsLayout",
+                "id": "node_m201qxv8",
+                "props": {
+                  "layout": "8:8:8",
+                  "layoutGap": 0,
+                  "breakpoint": "xs",
+                  "display": "VERTICAL",
+                  "style": {},
+                  "fieldId": "columns_m201qxvb"
+                },
+                "children": [
+                  {
+                    "componentName": "Column",
+                    "id": "node_m201qxv9",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvf",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出渠道",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountFundChannel}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountFundChannel",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvi",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出账户业务类型",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountBizType}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountBizType",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m3h80ahm",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出BU",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountBu}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountBu",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_m201qxva",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvk",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出账户",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountMerchantId}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountMerchantId",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvg",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出账户别名",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountName}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountName",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mfvx4frs",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvj",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出币种",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountCurrency}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountCurrency",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvh",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转出OU",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.fromAccountBizOwner}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "fromAccountBizOwner",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "componentName": "GroupLayout",
+            "id": "node_m201qxvb",
+            "props": {
+              "title": {
+                "use": "zh_CN",
+                "en_US": "Group",
+                "zh_CN": "转入账户",
+                "type": "i18n"
+              },
+              "fieldId": "group_m201qxvi"
+            },
+            "children": [
+              {
+                "componentName": "ColumnsLayout",
+                "id": "node_m201qxvc",
+                "props": {
+                  "layout": "8:8:8",
+                  "layoutGap": 0,
+                  "breakpoint": "xs",
+                  "display": "VERTICAL",
+                  "style": {},
+                  "fieldId": "columns_m201qxvc"
+                },
+                "children": [
+                  {
+                    "componentName": "Column",
+                    "id": "node_m201qxvd",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvl",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入渠道",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountFundChannel}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountFundChannel",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvo",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入账户业务类型",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountBizType}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountBizType",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m3h80ahn",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入BU",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountBu}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountBu",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_m201qxve",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvp",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入账户",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountMerchantId}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountMerchantId",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvm",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入账户别名",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountName}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountName",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mfvx4frt",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m2bm7mx7",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入币种",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountCurrency}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountCurrency",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_m201qxvn",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "转入OU",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.toAccountBizOwner}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "small",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [
+                            {
+                              "type": "required"
+                            }
+                          ],
+                          "fieldId": "toAccountBizOwner",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "componentName": "GroupLayout",
+            "id": "node_mfvx4fro",
+            "props": {
+              "title": {
+                "use": "zh_CN",
+                "en_US": "Group",
+                "zh_CN": "转账说明",
+                "type": "i18n"
+              },
+              "fieldId": "group_mfvx4fs3"
+            },
+            "children": [
+              {
+                "componentName": "ColumnsLayout",
+                "id": "node_mfvx4fru",
+                "props": {
+                  "layout": "8:8:8",
+                  "layoutGap": 0,
+                  "breakpoint": "xs",
+                  "display": "VERTICAL",
+                  "style": {},
+                  "fieldId": "columns_mfvx4fru"
+                },
+                "children": [
+                  {
+                    "componentName": "Column",
+                    "id": "node_mfvx4frv",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "NumberField",
+                        "id": "node_mfvyolgl",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Number Field",
+                            "zh_CN": "转出金额",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please type number",
+                            "zh_CN": "请输入数字",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": ""
+                          },
+                          "jsxtype": "money",
+                          "delimiter": ",",
+                          "fixedNum": 2,
+                          "formatOnBlur": false,
+                          "unit": {
+                            "use": "zh_CN",
+                            "type": "i18n"
+                          },
+                          "align": "left",
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "validation": [],
+                          "fieldId": "transOutAmount",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_mcvo463w",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "是否跨币种",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.isCrossCurrency}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [],
+                          "fieldId": "isCrossCurrency",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "AttachmentField",
+                        "id": "node_m201qxvt",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Attachment",
+                            "zh_CN": "上传附件",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "button": {
+                            "use": "zh_CN",
+                            "en_US": "Add File",
+                            "zh_CN": "添加附件",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": []
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "NORMAL"
+                          },
+                          "onlineEdit": false,
+                          "multiple": true,
+                          "preventDuplicate": false,
+                          "accept": "",
+                          "sizeLimit": 20,
+                          "queueCapcity": 0,
+                          "chunkEnable": false,
+                          "chunkSize": 0,
+                          "chunkRetries": 0,
+                          "chunkProcessThreads": 2,
+                          "useH5Only": false,
+                          "validation": [],
+                          "fieldId": "upLink",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mfvx4frw",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "NumberField",
+                        "id": "node_mfvyolgk",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Number Field",
+                            "zh_CN": "转入金额",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please type number",
+                            "zh_CN": "请输入数字",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": ""
+                          },
+                          "jsxtype": "money",
+                          "delimiter": ",",
+                          "fixedNum": 2,
+                          "formatOnBlur": false,
+                          "unit": {
+                            "use": "zh_CN",
+                            "type": "i18n"
+                          },
+                          "align": "left",
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "validation": [],
+                          "fieldId": "transInAmount",
+                          "events": {}
+                        }
+                      },
+                      {
+                        "componentName": "TextField",
+                        "id": "node_mcvo463v",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Text Field",
+                            "zh_CN": "是否跨OU",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.isCrossOu}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "inputType": false,
+                          "validation": [],
+                          "fieldId": "isCrossOu",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "componentName": "Column",
+                    "id": "node_mfvx4frz",
+                    "props": {
+                      "style": {}
+                    },
+                    "children": [
+                      {
+                        "componentName": "TextareaField",
+                        "id": "node_m201qxvs",
+                        "props": {
+                          "label": {
+                            "use": "zh_CN",
+                            "en_US": "Textarea Field",
+                            "zh_CN": "转账说明",
+                            "type": "i18n"
+                          },
+                          "showLabel": true,
+                          "placeholder": {
+                            "use": "zh_CN",
+                            "en_US": "Please Input",
+                            "zh_CN": "请输入",
+                            "type": "i18n"
+                          },
+                          "defaultValue": {
+                            "value": {
+                              "use": "zh_CN",
+                              "zh_CN": "${processVariables.memo}",
+                              "type": "i18n"
+                            }
+                          },
+                          "tips": {
+                            "en_US": "",
+                            "zh_CN": "",
+                            "type": "i18n"
+                          },
+                          "style": {
+                            "maxWidth": "446px"
+                          },
+                          "maxHeight": "",
+                          "layout": "VERTICAL",
+                          "size": "large",
+                          "defaultBehavior": {
+                            "fieldBehavior": "READONLY"
+                          },
+                          "autoTrim": false,
+                          "showCounter": false,
+                          "validation": [],
+                          "fieldId": "memo",
+                          "events": {}
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "componentName": "LinkBlock",
+            "id": "node_mmki2bdx",
+            "props": {
+              "link": {},
+              "style": {},
+              "fieldId": "linkBlock_mmki2be1",
+              "events": {}
+            },
+            "children": []
+          },
+          {
+            "componentName": "LinkBlock",
+            "id": "node_mmki2bdw",
+            "props": {
+              "link": {},
+              "style": {},
+              "fieldId": "linkBlock_mmki2be0",
+              "events": {}
+            },
+            "children": []
+          },
+          {
+            "componentName": "LinkBlock",
+            "id": "node_mmki2bdv",
+            "props": {
+              "link": {},
+              "style": {},
+              "fieldId": "linkBlock_mmki2bdz",
+              "events": {}
+            },
+            "children": []
+          }
+        ]
+      },
+      "params": {},
+      "dataSource": {
+        "offline": [],
+        "globalConfig": {
+          "fit": {
+            "compiled": "",
+            "source": "",
+            "type": "js",
+            "error": {}
+          },
+          "onError": {
+            "compiled": "",
+            "source": "",
+            "type": "js",
+            "error": {}
+          },
+          "willFetch": {
+            "compiled": "'use strict';\n\nvar __preParser__ = function willFecth(vars, config, ctx) {\n  // 2023.7.20 接口统一添加多租户标识\n  if (window.pageBpmsDetailConfig && window.pageBpmsDetailConfig.corpId) {\n    config.header['x-ali-tenant-id'] = window.pageBpmsDetailConfig.corpId;\n  }\n};",
+            "source": "function willFecth(vars, config, ctx) {\n  // 2023.7.20 接口统一添加多租户标识\n  if (window.pageBpmsDetailConfig && window.pageBpmsDetailConfig.corpId) {\n    config.header['x-ali-tenant-id'] = window.pageBpmsDetailConfig.corpId;\n  }\n}",
+            "type": "js",
+            "error": {}
+          }
+        },
+        "online": [
+          {
+            "id": "b5477132-0706-44b7-bcad-89e9bf73e96d",
+            "name": "urlParams",
+            "description": "",
+            "formUuid": "FORM-d2351383-a842-4f8f-b18f-0195684e9aab",
+            "protocal": "URI",
+            "effectForm": [
+              "FORM-d2351383-a842-4f8f-b18f-0195684e9aab"
+            ],
+            "gmtModified": 1773141943000
+          },
+          {
+            "id": "1f72cd05-1340-4644-ad27-0423d9e2b897",
+            "name": "processVariables",
+            "description": "流程变量, 使用方法:  ${processVariables.变量名}, 同时数据源改为自动",
+            "formUuid": "FORM-d2351383-a842-4f8f-b18f-0195684e9aab",
+            "protocal": "REMOTE",
+            "effectForm": [
+              "FORM-d2351383-a842-4f8f-b18f-0195684e9aab"
+            ],
+            "gmtModified": 1773142168000,
+            "isModified": false,
+            "loadType": "AUTO",
+            "method": "JSONP",
+            "exports": [],
+            "didFetch": {
+              "compiled": "\"use strict\";\n\nvar __preParser__ = function didFetch(content, ctx) {\n  return content;\n};",
+              "source": "function didFetch(content, ctx) {\n  return content; \n}",
+              "type": "js",
+              "error": {}
+            },
+            "shouldFetch": "",
+            "url": "/workdesk/inst/getInstVariables.jsonp",
+            "params": [
+              {
+                "name": "processCode",
+                "value": "${urlParams.processCode}"
+              },
+              {
+                "name": "instId",
+                "value": "${urlParams.procInsId || urlParams.processInstanceId || (window.pageBpmsDetailConfig && window.pageBpmsDetailConfig.instId)}"
+              },
+              {
+                "name": "shadowFlag",
+                "value": "${urlParams.shadowFlag}"
+              }
+            ],
+            "fit": {
+              "compiled": "\"use strict\";\n\nvar __preParser__ = function fit(content, ctx) {\n  content.content = content.data;\n  return content;\n};",
+              "source": "function fit(content, ctx) {\n  content.content = content.data;\n  return content;\n}",
+              "type": "js",
+              "error": {}
+            }
+          }
+        ],
+        "sync": true
+      }
+    }
+  ],
+  "actions": {
+    "module": {
+      "compiled": "'use strict';\n\nexports.__esModule = true;\nexports.showDialog = showDialog;\n/**\n * 私有的，可复用的函数\n * 动作面板帮助文档：\n * @see https://lark.alipay.com/legao/help/design-tool-logic\nfunction printLog(obj) {\n  console.info(obj);\n}\n\n/**\n * 可在动作面板中被选中的的回调函数\n *\n * 该函数接收一个 context 参数，context 参数的具体用法见：\n * https://lark.alipay.com/vision/api/render-engine\n */\nfunction showDialog(ctx) {\n  ctx.fn.dialog({\n    method: 'alert',\n    title: '提交成功',\n    content: '感谢您的提交...',\n    callback: function callback() {}\n  });\n}",
+      "source": "/**\n * 私有的，可复用的函数\n * 动作面板帮助文档：\n * @see https://lark.alipay.com/legao/help/design-tool-logic\nfunction printLog(obj) {\n  console.info(obj);\n}\n\n/**\n * 可在动作面板中被选中的的回调函数\n *\n * 该函数接收一个 context 参数，context 参数的具体用法见：\n * https://lark.alipay.com/vision/api/render-engine\n */\nexport function showDialog(ctx) {\n  ctx.fn.dialog({\n    method: 'alert',\n    title: '提交成功',\n    content: '感谢您的提交...',\n    callback: function () {},\n  });\n}"
+    },
+    "type": "FUNCTION",
+    "list": [
+      {
+        "id": "showDialog",
+        "title": "showDialog"
+      }
+    ]
+  }
+}

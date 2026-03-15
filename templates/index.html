@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}首页 - 语料评测平台{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 上传区域 -->
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-cloud-upload"></i> 上传语料文件</h5>
+            </div>
+            <div class="card-body">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">语料类型</label>
+                        <select name="corpus_type" class="form-select" id="corpus-type">
+                            <option value="question">Question 语料（仅问题）</option>
+                            <option value="qa">QA 对语料（问题+答案）</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">选择文件</label>
+                        <input type="file" name="file" class="form-control" accept=".csv,.txt" required>
+                        <div class="form-text">支持 CSV、TXT 格式，最大 50MB</div>
+                    </div>
+                    <div id="format-hint-question" class="alert alert-info small">
+                        <strong>CSV 格式：</strong>含 question/q/问题 列<br>
+                        <strong>TXT 格式：</strong>每行一个问题
+                    </div>
+                    <div id="format-hint-qa" class="alert alert-info small d-none">
+                        <strong>CSV 格式：</strong>含 question 和 answer 列<br>
+                        <strong>TXT 格式：</strong>每行用 TAB 或 ||| 分隔问题和答案
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-upload"></i> 上传并解析
+                    </button>
+                </form>
+                <div id="upload-progress" class="mt-3 d-none">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                    </div>
+                    <p class="text-center mt-2">正在上传和解析...</p>
+                </div>
+            </div>
+        </div>
+
+        {% if not configs %}
+        <div class="alert alert-warning mt-3">
+            <i class="bi bi-exclamation-triangle"></i>
+            尚未配置大模型，请先 <a href="/config">配置大模型</a> 后再进行评测。
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 语料文件列表 -->
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-folder2-open"></i> 语料文件列表</h5>
+                <span class="badge bg-secondary">共 {{ files|length }} 个文件</span>
+            </div>
+            <div class="card-body">
+                {% if files %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>文件名</th>
+                                <th>类型</th>
+                                <th>格式</th>
+                                <th>条数</th>
+                                <th>上传时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in files %}
+                            <tr>
+                                <td>
+                                    <a href="/corpus/{{ file.id }}">{{ file.original_name }}</a>
+                                </td>
+                                <td>
+                                    {% if file.corpus_type == 'question' %}
+                                    <span class="badge bg-info">Question</span>
+                                    {% else %}
+                                    <span class="badge bg-success">QA对</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="badge bg-secondary">{{ file.file_type|upper }}</span></td>
+                                <td>{{ file.record_count }}</td>
+                                <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    <a href="/corpus/{{ file.id }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="/api/export/{{ file.id }}" class="btn btn-sm btn-outline-success">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCorpus({{ file.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-2">暂无语料文件，请上传语料</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 语料类型切换提示
+document.getElementById('corpus-type').addEventListener('change', function() {
+    const isQA = this.value === 'qa';
+    document.getElementById('format-hint-question').classList.toggle('d-none', isQA);
+    document.getElementById('format-hint-qa').classList.toggle('d-none', !isQA);
+});
+
+// 文件上传
+document.getElementById('upload-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const progress = document.getElementById('upload-progress');
+    progress.classList.remove('d-none');
+
+    fetch('/api/upload', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            progress.classList.add('d-none');
+            if (data.error) {
+                showAlert(data.error, 'danger');
+            } else {
+                showAlert(data.message, 'success');
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+            progress.classList.add('d-none');
+            showAlert('上传失败: ' + err.message, 'danger');
+        });
+});
+
+function deleteCorpus(fileId) {
+    if (!confirm('确定要删除这个语料文件吗？')) return;
+    fetch('/api/corpus/' + fileId, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            showAlert(data.message || data.error, data.error ? 'danger' : 'success');
+            if (!data.error) setTimeout(() => location.reload(), 500);
+        });
+}
+</script>
+{% endblock %}
