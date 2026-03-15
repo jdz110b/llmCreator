@@ -90,6 +90,11 @@ def get_llm_service(config_id=None):
 
 # ==================== 页面路由 ====================
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No Content
+
+
 @app.route('/')
 def index():
     files = CorpusFile.query.order_by(CorpusFile.created_at.desc()).all()
