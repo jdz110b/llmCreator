@@ -1,5 +1,19 @@
 """Answer 打分服务"""
+import re
 from services.llm_service import LLMService
+
+
+def clean_answer(answer: str) -> str:
+    """清理答案文本：移除 URL 和 RASP 格式内容"""
+    if not answer:
+        return ""
+    # 移除 http/https 开头的 URL
+    answer = re.sub(r'https?://\S+', '', answer)
+    # 移除类似 rasp:// 开头的内容
+    answer = re.sub(r'rasp://\S+', '', answer)
+    # 移除多余的空白字符
+    answer = re.sub(r'\s+', ' ', answer).strip()
+    return answer
 
 
 DEFAULT_SCORE_PROMPT = """你是一个专业的答案评估专家。请对以下问答对中的答案进行评分。
@@ -28,7 +42,9 @@ SYSTEM_PROMPT = "你是一个专业的语料评测助手，负责对答案进行
 
 def score_answer(llm: LLMService, question: str, answer: str, custom_prompt: str = None):
     """对 QA 对中的 Answer 进行打分"""
+    # 预处理答案：移除 URL 和 RASP 格式内容
+    clean_ans = clean_answer(answer)
     prompt = custom_prompt or DEFAULT_SCORE_PROMPT
-    user_prompt = prompt.replace('{question}', question).replace('{answer}', answer)
+    user_prompt = prompt.replace('{question}', question).replace('{answer}', clean_ans)
     result = llm.chat_json(SYSTEM_PROMPT, user_prompt)
     return result
