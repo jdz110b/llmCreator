@@ -268,6 +268,55 @@ def delete_corpus(file_id):
 
 
 # ----- 分类与评测 -----
+@app.route('/api/classify-stream', methods=['POST'])
+def classify_items_stream():
+    """流式分类语料（每处理一行就返回结果）"""
+    from flask import Response, stream_with_context
+    import json
+
+    def generate():
+        data = request.json
+        file_id = data.get('file_id')
+        config_id = data.get('config_id')
+        classify_type = data.get('classify_type')
+        classify_types = data.get('classify_types', [])
+        categories = data.get('categories', '')
+        prompt_id = data.get('prompt_id')
+        item_ids = data.get('item_ids', [])
+
+        llm = get_llm_service(config_id)
+        if not llm:
+            yield f"data: {json.dumps({'error': '请先配置大模型'})}\n\n"
+            return
+
+        custom_prompt = None
+        if prompt_id:
+            tpl = PromptTemplate.query.get(prompt_id)
+            if tpl:
+                custom_prompt = tpl.content
+
+        if item_ids:
+            items = CorpusItem.query.filter(CorpusItem.id.in_(item_ids)).all()
+        else:
+            items = CorpusItem.query.filter_by(file_id=file_id).all()
+
+        total = len(items)
+        for i, item in enumerate(items, 1):
+            try:
+                if classify_type == 'combined':
+                    res = classify_combined(llm, item.question, categories, custom_prompt)
+                    _apply_combined_result(item, res, classify_types, categories)
+                    db.session.commit()
+                    yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': res})}\n\n"
+                else:
+                    # 其他分类类型保持原有逻辑（简化处理）
+                    yield f"data: {json.dumps({'status': 'skip', 'item_id': item.id, 'progress': i, 'total': total})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
 @app.route('/api/classify', methods=['POST'])
 def classify_items():
     """批量分类语料"""
