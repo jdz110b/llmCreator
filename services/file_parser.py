@@ -2,6 +2,25 @@
 import csv
 import io
 import os
+import chardet
+
+
+def detect_encoding(filepath, sample_size=32768):
+    """检测文件编码"""
+    with open(filepath, 'rb') as f:
+        raw_data = f.read(sample_size)
+        result = chardet.detect(raw_data)
+        encoding = result['encoding']
+        confidence = result['confidence']
+        # 如果置信度不高或检测为 ascii，尝试常见中文编码
+        if confidence < 0.7 or encoding.lower() == 'ascii':
+            for enc in ['utf-8-sig', 'gbk', 'gb2312', 'gb18030']:
+                try:
+                    raw_data.decode(enc)
+                    return enc
+                except UnicodeDecodeError:
+                    continue
+        return encoding or 'utf-8'
 
 
 def allowed_file(filename, allowed_extensions):
@@ -15,7 +34,8 @@ def parse_csv(filepath, corpus_type='question'):
     corpus_type='qa': 需要 question 和 answer 列
     """
     items = []
-    with open(filepath, 'r', encoding='utf-8-sig') as f:
+    encoding = detect_encoding(filepath)
+    with open(filepath, 'r', encoding=encoding) as f:
         # 尝试检测分隔符
         sample = f.read(4096)
         f.seek(0)
@@ -74,10 +94,11 @@ def parse_csv(filepath, corpus_type='question'):
 def parse_txt(filepath, corpus_type='question'):
     """
     解析 TXT 文件
-    每行一个 question；如果是 QA 对，用 \\t 或 ||| 分隔
+    每行一个 question；如果是 QA 对，用 \t 或 ||| 分隔
     """
     items = []
-    with open(filepath, 'r', encoding='utf-8') as f:
+    encoding = detect_encoding(filepath)
+    with open(filepath, 'r', encoding=encoding) as f:
         for line in f:
             line = line.strip()
             if not line:
