@@ -29,6 +29,17 @@
                         <label class="form-label">模型名称</label>
                         <input type="text" name="model" class="form-control" placeholder="例如: gpt-4o, qwen-max" required>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">代理地址（可选）</label>
+                        <input type="text" name="proxy" class="form-control" 
+                               placeholder="例如: http://proxy.company.com:8080">
+                        <div class="form-text">如需通过代理访问 API，填写代理服务器地址</div>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" name="verify_ssl" class="form-check-input" id="verify-ssl" checked>
+                        <label class="form-check-label" for="verify-ssl">验证 SSL 证书</label>
+                        <div class="form-text">取消勾选可跳过证书验证（用于自签名证书环境）</div>
+                    </div>
                     <div class="mb-3 form-check">
                         <input type="checkbox" name="is_default" class="form-check-input" id="is-default">
                         <label class="form-check-label" for="is-default">设为默认模型</label>
@@ -52,6 +63,12 @@
                             {% endif %}
                             <br>
                             <small class="text-muted">{{ config.model }} | {{ config.api_url[:40] }}...</small>
+                            {% if config.proxy %}
+                            <br><small class="text-muted">代理: {{ config.proxy }}</small>
+                            {% endif %}
+                            {% if not config.verify_ssl %}
+                            <br><small class="text-warning">⚠️ 跳过 SSL 验证</small>
+                            {% endif %}
                         </div>
                         <div>
                             <button class="btn btn-sm btn-outline-info" onclick="testConfig({{ config.id }})">
@@ -161,6 +178,8 @@ document.getElementById('llm-config-form').addEventListener('submit', function(e
         api_url: formData.get('api_url'),
         api_key: formData.get('api_key'),
         model: formData.get('model'),
+        proxy: formData.get('proxy') || null,
+        verify_ssl: formData.get('verify_ssl') === 'on',
         is_default: formData.get('is_default') === 'on',
     };
     fetch('/api/llm-config', {
@@ -177,13 +196,27 @@ document.getElementById('llm-config-form').addEventListener('submit', function(e
 
 function testConfig(id) {
     showAlert('正在测试连接...', 'info');
-    fetch('/api/llm-config/' + id + '/test', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) showAlert(data.error, 'danger');
-            else showAlert(data.message + ': ' + data.response, 'success');
+    fetch('/api/llm-config/' + id + '/test', { 
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+        .then(r => {
+            if (!r.ok) {
+                throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            }
+            return r.json();
         })
-        .catch(err => showAlert('测试失败: ' + err.message, 'danger'));
+        .then(data => {
+            if (data.error) {
+                showAlert('❌ ' + data.error, 'danger');
+            } else {
+                showAlert('✅ ' + data.message + ': ' + data.response, 'success');
+            }
+        })
+        .catch(err => {
+            console.error('Test Error:', err);
+            showAlert('❌ 测试失败: ' + err.message, 'danger');
+        });
 }
 
 function deleteConfig(id) {

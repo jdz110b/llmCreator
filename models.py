@@ -12,6 +12,8 @@ class LLMConfig(db.Model):
     api_url = db.Column(db.String(500), nullable=False)
     api_key = db.Column(db.String(500), nullable=False)
     model = db.Column(db.String(200), nullable=False)
+    proxy = db.Column(db.String(500), nullable=True)  # 代理地址，如 http://proxy:port
+    verify_ssl = db.Column(db.Boolean, default=True)  # 是否验证 SSL 证书
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

@@ -4,10 +4,21 @@ import requests
 
 
 class LLMService:
-    def __init__(self, api_url, api_key, model):
+    def __init__(self, api_url, api_key, model, proxy=None, verify_ssl=True):
         self.api_url = api_url.rstrip('/')
         self.api_key = api_key
         self.model = model
+        self.proxy = proxy
+        self.verify_ssl = verify_ssl
+        
+        # 构造 requests 会话
+        self.session = requests.Session()
+        if proxy:
+            self.session.proxies = {
+                'http': proxy,
+                'https': proxy
+            }
+        self.session.verify = verify_ssl
 
     def chat(self, system_prompt, user_prompt, temperature=0.3, max_tokens=2000):
         """
@@ -33,7 +44,7 @@ class LLMService:
             'max_tokens': max_tokens,
         }
 
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        resp = self.session.post(url, headers=headers, json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
 

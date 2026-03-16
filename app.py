@@ -85,7 +85,7 @@ def get_llm_service(config_id=None):
         cfg = LLMConfig.query.first()
     if not cfg:
         return None
-    return LLMService(cfg.api_url, cfg.api_key, cfg.model)
+    return LLMService(cfg.api_url, cfg.api_key, cfg.model, cfg.proxy, cfg.verify_ssl)
 
 
 # ==================== 页面路由 ====================
@@ -129,6 +129,8 @@ def save_llm_config():
     api_url = data.get('api_url', '').strip()
     api_key = data.get('api_key', '').strip()
     model = data.get('model', '').strip()
+    proxy = data.get('proxy', '').strip() or None
+    verify_ssl = data.get('verify_ssl', True)
     is_default = data.get('is_default', False)
 
     if not all([name, api_url, api_key, model]):
@@ -137,8 +139,15 @@ def save_llm_config():
     if is_default:
         LLMConfig.query.update({'is_default': False})
 
-    config = LLMConfig(name=name, api_url=api_url, api_key=api_key,
-                       model=model, is_default=is_default)
+    config = LLMConfig(
+        name=name, 
+        api_url=api_url, 
+        api_key=api_key,
+        model=model, 
+        proxy=proxy,
+        verify_ssl=verify_ssl,
+        is_default=is_default
+    )
     db.session.add(config)
     db.session.commit()
     return jsonify({'id': config.id, 'message': '保存成功'})
@@ -159,7 +168,15 @@ def test_llm_config(config_id):
         llm = LLMService(config.api_url, config.api_key, config.model)
         result = llm.chat("你是一个助手。", "请回复'连接成功'这四个字。", temperature=0)
         return jsonify({'message': '连接测试成功', 'response': result})
+    except requests.exceptions.Timeout:
+        return jsonify({'error': '连接超时，请检查网络或增大超时时间'}), 500
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({'error': f'网络连接失败: {str(e)}'}), 500
     except Exception as e:
+        # 记录详细错误日志
+        import traceback
+        print(f"[LLM Test Error] Config ID {config_id}: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'error': f'连接失败: {str(e)}'}), 500
 
 
