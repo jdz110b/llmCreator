@@ -14,10 +14,19 @@ class LLMService:
         # 构造 requests 会话
         self.session = requests.Session()
         if proxy:
-            self.session.proxies = {
-                'http': proxy,
-                'https': proxy
-            }
+            # 兼容 http 和 https 代理
+            if proxy.startswith('http://') or proxy.startswith('https://'):
+                self.session.proxies = {
+                    'http': proxy,
+                    'https': proxy
+                }
+            else:
+                # 如果没有协议前缀，自动加上 http://
+                proxy_url = f'http://{proxy}'
+                self.session.proxies = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
         self.session.verify = verify_ssl
 
     def chat(self, system_prompt, user_prompt, temperature=0.3, max_tokens=2000):
