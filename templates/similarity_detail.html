@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}{{ task.original_name }} - 答案对比{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4>
+            <i class="bi bi-arrow-left-right"></i> {{ task.original_name }}
+            {% if task.status == 'completed' %}
+            <span class="badge bg-success">已完成</span>
+            {% elif task.status == 'running' %}
+            <span class="badge bg-warning">进行中</span>
+            {% else %}
+            <span class="badge bg-secondary">待对比</span>
+            {% endif %}
+        </h4>
+        <small class="text-muted">
+            共 {{ task.record_count }} 条数据 |
+            已对比 {{ task.compared_count }} 条 |
+            {% if task.upload_mode == 'dual' %}
+            模式: 双文件对比 |
+            {% endif %}
+            格式: {{ task.file_type|upper }} |
+            上传时间: {{ task.created_at.strftime('%Y-%m-%d %H:%M') }}
+        </small>
+    </div>
+    <div>
+        <a href="/api/export-similarity/{{ task.id }}" class="btn btn-outline-success">
+            <i class="bi bi-download"></i> 导出结果
+        </a>
+        <a href="/similarity" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回
+        </a>
+    </div>
+</div>
+
+{% if task.upload_mode == 'dual' and task.unmatched_count and task.unmatched_count > 0 %}
+<div class="alert alert-warning alert-dismissible fade show" role="alert">
+    <i class="bi bi-info-circle"></i>
+    有 {{ task.unmatched_count }} 个问题未匹配，仅显示已匹配的数据。
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<!-- 统计摘要 -->
+{% set scored_items = items | selectattr('similarity_score') | list %}
+{% if scored_items %}
+<div class="row mb-3">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">平均相似度</div>
+                {% set avg_score = (scored_items | map(attribute='similarity_score') | sum / scored_items | length) | round(1) %}
+                <h4 class="mb-0 {% if avg_score >= 80 %}text-success{% elif avg_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
+                    {{ avg_score }}
+                </h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">高相似度</div>
+                <h4 class="mb-0 text-success">{{ scored_items | selectattr('similarity_label', 'equalto', 'high') | list | length }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">中相似度</div>
+                <h4 class="mb-0 text-warning">{{ scored_items | selectattr('similarity_label', 'equalto', 'medium') | list | length }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="text-muted small">低相似度</div>
+                <h4 class="mb-0 text-danger">{{ scored_items | selectattr('similarity_label', 'equalto', 'low') | list | length }}</h4>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 操作面板 -->
+<div class="card mb-3">
+    <div class="card-header">
+        <h5><i class="bi bi-tools"></i> 对比操作</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">选择大模型</label>
+                <select id="config-select" class="form-select" onchange="rememberConfig(this.value)">
+                    {% for config in configs %}
+                    <option value="{{ config.id }}">
+                        {{ config.name }} ({{ config.model }})
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if not configs %}
+                <div class="form-text text-danger">请先 <a href="/config">配置大模型</a></div>
+                {% endif %}
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Prompt 模板（可选）</label>
+                <select id="prompt-select" class="form-select">
+                    <option value="">使用默认 Prompt</option>
+                    {% for prompt in prompts %}
+                    {% if prompt.prompt_type == 'similarity_compare' %}
+                    <option value="{{ prompt.id }}">{{ prompt.name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <button class="btn btn-primary" onclick="startCompare()">
+                    <i class="bi bi-play-fill"></i> 开始对比
+                </button>
+            </div>
+        </div>
+        <!-- 进度条 -->
+        <div id="task-progress" class="mt-3 d-none">
+            <div class="progress">
+                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                     style="width: 0%"></div>
+            </div>
+            <p id="progress-text" class="text-center mt-1">处理中...</p>
+        </div>
+    </div>
+</div>
+
+<!-- 数据表格 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-table"></i> 对比数据</h5>
+        <span class="badge bg-secondary">共 {{ items|length }} 条</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th width="50">ID</th>
+                        <th>问题</th>
+                        <th>答案1</th>
+                        <th>答案2</th>
+                        <th width="80">相似度</th>
+                        <th width="60">等级</th>
+                        <th>关键差异</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td class="text-truncate" style="max-width: 200px;" title="{{ item.question }}">
+                            {{ item.question }}
+                        </td>
+                        <td class="text-truncate" style="max-width: 180px;" title="{{ item.answer1 }}">
+                            {{ item.answer1 }}
+                        </td>
+                        <td class="text-truncate" style="max-width: 180px;" title="{{ item.answer2 }}">
+                            {{ item.answer2 }}
+                        </td>
+                        <td id="score-{{ item.id }}">
+                            {% if item.similarity_score is not none %}
+                            <span class="badge {% if item.similarity_score >= 80 %}bg-success{% elif item.similarity_score >= 40 %}bg-warning{% else %}bg-danger{% endif %}">
+                                {{ item.similarity_score | round(0) | int }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td id="label-{{ item.id }}">
+                            {% if item.similarity_label == 'high' %}
+                            <span class="badge bg-success">高</span>
+                            {% elif item.similarity_label == 'medium' %}
+                            <span class="badge bg-warning">中</span>
+                            {% elif item.similarity_label == 'low' %}
+                            <span class="badge bg-danger">低</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td id="diff-{{ item.id }}" class="text-truncate" style="max-width: 250px;" title="{{ item.key_differences }}">
+                            {{ item.key_differences or '-' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var TASK_ID = {{ task.id }};
+var CONFIG_STORAGE_KEY = 'similarity_selected_config';
+
+(function restoreConfig() {
+    var saved = localStorage.getItem(CONFIG_STORAGE_KEY);
+    var select = document.getElementById('config-select');
+    if (saved && select) {
+        for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === saved) {
+                select.value = saved;
+                break;
+            }
+        }
+    }
+})();
+
+function rememberConfig(val) {
+    localStorage.setItem(CONFIG_STORAGE_KEY, val);
+}
+
+function startCompare() {
+    var configId = document.getElementById('config-select').value;
+    if (!configId) { showAlert('请先选择大模型', 'danger'); return; }
+
+    var promptId = document.getElementById('prompt-select').value;
+
+    var progressDiv = document.getElementById('task-progress');
+    var progressBar = document.getElementById('progress-bar');
+    var progressText = document.getElementById('progress-text');
+    progressDiv.classList.remove('d-none');
+    progressBar.style.width = '0%';
+    progressText.textContent = '正在对比...';
+
+    fetch('/api/similarity-compare-stream', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            task_id: TASK_ID,
+            config_id: parseInt(configId),
+            prompt_id: promptId ? parseInt(promptId) : null,
+            item_ids: [],
+        }),
+    }).then(function(response) {
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function processChunk(result) {
+            if (result.done) {
+                progressText.textContent = '对比完成！';
+                progressBar.classList.remove('progress-bar-animated');
+                progressBar.style.width = '100%';
+                setTimeout(function() { location.reload(); }, 1500);
+                return;
+            }
+
+            buffer += decoder.decode(result.value, {stream: true});
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (line.startsWith('data: ')) {
+                    try {
+                        var data = JSON.parse(line.substring(6));
+                        if (data.error) {
+                            showAlert(data.error, 'danger');
+                            progressDiv.classList.add('d-none');
+                            return;
+                        }
+                        if (data.status === 'done') {
+                            progressText.textContent = data.message;
+                            progressBar.classList.remove('progress-bar-animated');
+                            progressBar.style.width = '100%';
+                            setTimeout(function() { location.reload(); }, 1500);
+                            return;
+                        }
+                        if (data.progress && data.total) {
+                            var pct = Math.round(data.progress / data.total * 100);
+                            progressBar.style.width = pct + '%';
+                            progressText.textContent = '对比中 ' + data.progress + '/' + data.total + '...';
+                        }
+                        if (data.status === 'ok' && data.data) {
+                            updateRow(data.item_id, data.data);
+                        }
+                    } catch(e) {}
+                }
+            }
+            return reader.read().then(processChunk);
+        }
+
+        return reader.read().then(processChunk);
+    }).catch(function(err) {
+        progressDiv.classList.add('d-none');
+        showAlert('对比失败: ' + err.message, 'danger');
+    });
+}
+
+function updateRow(itemId, data) {
+    var scoreEl = document.getElementById('score-' + itemId);
+    var labelEl = document.getElementById('label-' + itemId);
+    var diffEl = document.getElementById('diff-' + itemId);
+
+    if (scoreEl && data.similarity_score !== undefined) {
+        var score = Math.round(data.similarity_score);
+        var cls = score >= 80 ? 'bg-success' : (score >= 40 ? 'bg-warning' : 'bg-danger');
+        scoreEl.innerHTML = '<span class="badge ' + cls + '">' + score + '</span>';
+    }
+    if (labelEl && data.similarity_label) {
+        var labelMap = {'high': ['bg-success', '高'], 'medium': ['bg-warning', '中'], 'low': ['bg-danger', '低']};
+        var info = labelMap[data.similarity_label] || ['bg-secondary', data.similarity_label];
+        labelEl.innerHTML = '<span class="badge ' + info[0] + '">' + info[1] + '</span>';
+    }
+    if (diffEl && data.key_differences) {
+        diffEl.textContent = data.key_differences;
+        diffEl.title = data.key_differences;
+    }
+}
+</script>
+{% endblock %}

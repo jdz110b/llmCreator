@@ -3,12 +3,13 @@ import os
 import json
 import uuid
 import traceback
+import requests as req_lib
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 
 from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DATABASE_URI
-from models import db, LLMConfig, CorpusFile, CorpusItem, PromptTemplate
-from services.file_parser import parse_file, allowed_file
+from models import db, LLMConfig, CorpusFile, CorpusItem, PromptTemplate, SimilarityTask, SimilarityItem
+from services.file_parser import parse_file, parse_file_similarity, parse_file_qa, match_qa_files, allowed_file
 from services.llm_service import LLMService
 from services.classifier import (
     classify_subjective_objective, classify_difficulty,
@@ -20,7 +21,8 @@ from services.classifier import (
     DEFAULT_QUALITY_EVAL_PROMPT, DEFAULT_DOMAIN_CLASSIFY_PROMPT,
     DEFAULT_INTENT_CLASSIFY_PROMPT, DEFAULT_COMBINED_CLASSIFY_PROMPT,
 )
-from services.scorer import score_answer, DEFAULT_SCORE_PROMPT
+from services.scorer import score_answer, clean_answer_v2, DEFAULT_SCORE_PROMPT
+from services.comparator import compare_similarity, DEFAULT_SIMILARITY_COMPARE_PROMPT
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'corpus-eval-platform-secret'
@@ -62,6 +64,7 @@ with app.app_context():
         ('领域/场景分类', 'domain_classify', DEFAULT_DOMAIN_CLASSIFY_PROMPT),
         ('意图识别分类', 'intent_classify', DEFAULT_INTENT_CLASSIFY_PROMPT),
         ('综合分类(一次调用)', 'combined_classify', DEFAULT_COMBINED_CLASSIFY_PROMPT),
+        ('答案相似度对比', 'similarity_compare', DEFAULT_SIMILARITY_COMPARE_PROMPT),
     ]
     for name, ptype, content in defaults:
         existing = PromptTemplate.query.filter_by(prompt_type=ptype, is_default=True).first()
@@ -119,6 +122,23 @@ def corpus_detail(file_id):
                            configs=configs, prompts=prompts)
 
 
+@app.route('/similarity')
+def similarity_page():
+    tasks = SimilarityTask.query.order_by(SimilarityTask.created_at.desc()).all()
+    configs = LLMConfig.query.all()
+    return render_template('similarity.html', tasks=tasks, configs=configs)
+
+
+@app.route('/similarity/<int:task_id>')
+def similarity_detail(task_id):
+    task = SimilarityTask.query.get_or_404(task_id)
+    items = SimilarityItem.query.filter_by(task_id=task_id).all()
+    configs = LLMConfig.query.all()
+    prompts = PromptTemplate.query.all()
+    return render_template('similarity_detail.html', task=task, items=items,
+                           configs=configs, prompts=prompts)
+
+
 # ==================== API 路由 ====================
 
 # ----- LLM 配置 -----
@@ -129,7 +149,7 @@ def save_llm_config():
     api_url = data.get('api_url', '').strip()
     api_key = data.get('api_key', '').strip()
     model = data.get('model', '').strip()
-    proxy = data.get('proxy', '').strip() or None
+    proxy = (data.get('proxy') or '').strip() or None
     verify_ssl = data.get('verify_ssl', True)
     is_default = data.get('is_default', False)
 
@@ -168,9 +188,9 @@ def test_llm_config(config_id):
         llm = LLMService(config.api_url, config.api_key, config.model)
         result = llm.chat("你是一个助手。", "请回复'连接成功'这四个字。", temperature=0)
         return jsonify({'message': '连接测试成功', 'response': result})
-    except requests.exceptions.Timeout:
+    except req_lib.exceptions.Timeout:
         return jsonify({'error': '连接超时，请检查网络或增大超时时间'}), 500
-    except requests.exceptions.ConnectionError as e:
+    except req_lib.exceptions.ConnectionError as e:
         return jsonify({'error': f'网络连接失败: {str(e)}'}), 500
     except Exception as e:
         # 记录详细错误日志
@@ -584,6 +604,316 @@ def export_results(file_id):
 
     from urllib.parse import quote
     filename = os.path.splitext(corpus.original_name)[0] + '_评测结果.xlsx'
+    encoded = quote(filename)
+    return Response(
+        output.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded}"}
+    )
+
+
+# ==================== 相似度对比 API ====================
+
+@app.route('/api/upload-similarity', methods=['POST'])
+def upload_similarity():
+    """上传相似度对比文件"""
+    if 'file' not in request.files:
+        return jsonify({'error': '没有选择文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': '没有选择文件'}), 400
+
+    if not allowed_file(file.filename, ALLOWED_EXTENSIONS):
+        return jsonify({'error': f'不支持的文件格式，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
+    original_name = secure_filename(file.filename)
+    ext = original_name.rsplit('.', 1)[1].lower()
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+
+    try:
+        items = parse_file_similarity(filepath)
+        if not items:
+            os.remove(filepath)
+            return jsonify({'error': '文件解析失败或文件为空，请确保包含 question/answer1/answer2 三列'}), 400
+
+        task = SimilarityTask(
+            filename=filename,
+            original_name=file.filename,
+            file_type=ext,
+            record_count=len(items),
+        )
+        db.session.add(task)
+        db.session.flush()
+
+        for item_data in items:
+            a1 = item_data.get('answer1', '')
+            a2 = item_data.get('answer2', '')
+            item = SimilarityItem(
+                task_id=task.id,
+                question=item_data['question'],
+                answer1=a1,
+                answer2=a2,
+                answer1_cleaned=clean_answer_v2(a1),
+                answer2_cleaned=clean_answer_v2(a2),
+            )
+            db.session.add(item)
+
+        db.session.commit()
+        return jsonify({
+            'id': task.id,
+            'message': f'上传成功，解析到 {len(items)} 条对比数据',
+            'count': len(items),
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'解析失败: {str(e)}'}), 500
+
+
+@app.route('/api/upload-similarity-dual', methods=['POST'])
+def upload_similarity_dual():
+    """上传两个 QA 文件进行相似度对比"""
+    if 'file1' not in request.files or 'file2' not in request.files:
+        return jsonify({'error': '请同时选择两个文件'}), 400
+
+    file1 = request.files['file1']
+    file2 = request.files['file2']
+    if file1.filename == '' or file2.filename == '':
+        return jsonify({'error': '请同时选择两个文件'}), 400
+
+    for f in [file1, file2]:
+        if not allowed_file(f.filename, ALLOWED_EXTENSIONS):
+            return jsonify({'error': f'不支持的文件格式（{f.filename}），仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
+    # 保存两个文件
+    ext1 = file1.filename.rsplit('.', 1)[1].lower()
+    ext2 = file2.filename.rsplit('.', 1)[1].lower()
+    fname1 = f"{uuid.uuid4().hex}.{ext1}"
+    fname2 = f"{uuid.uuid4().hex}.{ext2}"
+    fpath1 = os.path.join(app.config['UPLOAD_FOLDER'], fname1)
+    fpath2 = os.path.join(app.config['UPLOAD_FOLDER'], fname2)
+    file1.save(fpath1)
+    file2.save(fpath2)
+
+    try:
+        items_a = parse_file_qa(fpath1)
+        if not items_a:
+            raise ValueError(f'文件1（{file1.filename}）解析失败或为空，请确保包含 Q 和 A 两列')
+
+        items_b = parse_file_qa(fpath2)
+        if not items_b:
+            raise ValueError(f'文件2（{file2.filename}）解析失败或为空，请确保包含 Q 和 A 两列')
+
+        matched, unmatched = match_qa_files(items_a, items_b)
+        if not matched:
+            raise ValueError(f'两个文件中没有匹配的问题（文件1: {len(items_a)} 条，文件2: {len(items_b)} 条）')
+
+        task = SimilarityTask(
+            filename=fname1,
+            original_name=f"{file1.filename} ↔ {file2.filename}",
+            file_type=ext1,
+            record_count=len(matched),
+            upload_mode='dual',
+            filename2=fname2,
+            original_name2=file2.filename,
+            unmatched_count=unmatched['total'],
+            unmatched_json=json.dumps(unmatched, ensure_ascii=False) if unmatched['total'] > 0 else None,
+        )
+        db.session.add(task)
+        db.session.flush()
+
+        for item_data in matched:
+            a1 = item_data['answer1']
+            a2 = item_data['answer2']
+            item = SimilarityItem(
+                task_id=task.id,
+                question=item_data['question'],
+                answer1=a1,
+                answer2=a2,
+                answer1_cleaned=clean_answer_v2(a1),
+                answer2_cleaned=clean_answer_v2(a2),
+            )
+            db.session.add(item)
+
+        db.session.commit()
+
+        resp = {
+            'id': task.id,
+            'message': f'上传成功，匹配到 {len(matched)} 条对比数据',
+            'count': len(matched),
+        }
+        if unmatched['total'] > 0:
+            resp['unmatched'] = {
+                'total': unmatched['total'],
+                'only_in_file1': len(unmatched['only_in_file1']),
+                'only_in_file2': len(unmatched['only_in_file2']),
+            }
+            resp['message'] += f'（{unmatched["total"]} 个问题未匹配）'
+        return jsonify(resp)
+
+    except Exception as e:
+        db.session.rollback()
+        for fp in [fpath1, fpath2]:
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/similarity/<int:task_id>', methods=['DELETE'])
+def delete_similarity(task_id):
+    """删除相似度对比任务"""
+    task = SimilarityTask.query.get_or_404(task_id)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], task.filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    if task.filename2:
+        filepath2 = os.path.join(app.config['UPLOAD_FOLDER'], task.filename2)
+        if os.path.exists(filepath2):
+            os.remove(filepath2)
+    db.session.delete(task)
+    db.session.commit()
+    return jsonify({'message': '删除成功'})
+
+
+@app.route('/api/similarity-compare-stream', methods=['POST'])
+def similarity_compare_stream():
+    """流式相似度对比"""
+    from flask import Response, stream_with_context
+
+    # 在生成器外部预先解析请求数据，避免生成器内部读取不到请求体
+    data = request.get_json(force=True, silent=True) or {}
+    task_id = data.get('task_id')
+    config_id = data.get('config_id')
+    prompt_id = data.get('prompt_id')
+    item_ids = data.get('item_ids', [])
+
+    def generate():
+      try:
+        llm = get_llm_service(config_id)
+        if not llm:
+            yield f"data: {json.dumps({'error': '请先配置大模型'})}\n\n"
+            return
+
+        custom_prompt = None
+        if prompt_id:
+            tpl = PromptTemplate.query.get(prompt_id)
+            if tpl:
+                custom_prompt = tpl.content
+
+        task = SimilarityTask.query.get(task_id)
+        if not task:
+            yield f"data: {json.dumps({'error': '任务不存在'})}\n\n"
+            return
+
+        task.status = 'running'
+        db.session.commit()
+
+        if item_ids:
+            items = SimilarityItem.query.filter(SimilarityItem.id.in_(item_ids)).all()
+        else:
+            items = SimilarityItem.query.filter_by(task_id=task_id).all()
+
+        total = len(items)
+        completed = 0
+        for i, item in enumerate(items, 1):
+            try:
+                a1 = item.answer1_cleaned or clean_answer_v2(item.answer1)
+                a2 = item.answer2_cleaned or clean_answer_v2(item.answer2)
+
+                if not a1.strip() and not a2.strip():
+                    yield f"data: {json.dumps({'status': 'skip', 'item_id': item.id, 'progress': i, 'total': total})}\n\n"
+                    continue
+
+                res = compare_similarity(llm, item.question, a1, a2, custom_prompt)
+                item.similarity_score = float(res.get('similarity_score', 0))
+                item.similarity_label = res.get('similarity_label', '')
+                kd = res.get('key_differences', '')
+                if isinstance(kd, list):
+                    kd = '；'.join(str(x) for x in kd)
+                item.key_differences = str(kd) if kd else ''
+                item.detail_json = json.dumps(res, ensure_ascii=False)
+                completed += 1
+                task.compared_count = completed
+                db.session.commit()
+
+                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': {'similarity_score': item.similarity_score, 'similarity_label': item.similarity_label, 'key_differences': item.key_differences}})}\n\n"
+            except Exception as e:
+                db.session.rollback()
+                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+
+        task.status = 'completed'
+        db.session.commit()
+        yield f"data: {json.dumps({'status': 'done', 'message': f'对比完成，共 {completed}/{total} 条'})}\n\n"
+      except Exception as outer_err:
+        import traceback
+        yield f"data: {json.dumps({'error': f'生成器异常: {str(outer_err)}', 'traceback': traceback.format_exc()})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/api/export-similarity/<int:task_id>')
+def export_similarity(task_id):
+    """导出相似度对比结果为 Excel"""
+    import io
+    from flask import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from urllib.parse import quote
+
+    task = SimilarityTask.query.get_or_404(task_id)
+    items = SimilarityItem.query.filter_by(task_id=task_id).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '相似度对比结果'
+
+    headers = ['ID', '问题', '答案1', '答案2', '相似度', '等级', '关键差异点']
+    ws.append(headers)
+
+    header_font = Font(bold=True, color='FFFFFF', size=11)
+    header_fill = PatternFill(start_color='344955', end_color='344955', fill_type='solid')
+    thin_border = Border(bottom=Side(style='thin', color='CCCCCC'))
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for idx, item in enumerate(items, 1):
+        label_display = ''
+        if item.similarity_label == 'high':
+            label_display = '高'
+        elif item.similarity_label == 'medium':
+            label_display = '中'
+        elif item.similarity_label == 'low':
+            label_display = '低'
+
+        ws.append([
+            idx, item.question, item.answer1, item.answer2,
+            item.similarity_score if item.similarity_score is not None else '',
+            label_display,
+            item.key_differences or '',
+        ])
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+
+    col_widths = [6, 40, 40, 40, 10, 8, 50]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = os.path.splitext(task.original_name)[0] + '_相似度对比结果.xlsx'
     encoded = quote(filename)
     return Response(
         output.getvalue(),

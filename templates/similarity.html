@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}答案对比 - 语料评测平台{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 上传区域 -->
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-bs-toggle="tab" href="#tab-single" role="tab">
+                            <i class="bi bi-file-earmark"></i> 单文件上传
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="tab" href="#tab-dual" role="tab">
+                            <i class="bi bi-files"></i> 双文件对比
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content">
+                    <!-- 单文件上传 -->
+                    <div class="tab-pane fade show active" id="tab-single" role="tabpanel">
+                        <form id="upload-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label class="form-label">选择文件</label>
+                                <input type="file" name="file" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                                <div class="form-text">支持 CSV、TXT、Excel（xlsx/xls）格式，最大 50MB</div>
+                            </div>
+                            <div class="alert alert-info small">
+                                <strong>文件要求：</strong>包含 3 列数据<br>
+                                <strong>CSV/Excel：</strong>含 question、answer1、answer2 列<br>
+                                <strong>TXT 格式：</strong>每行用 TAB 或 ||| 分隔 question、answer1、answer2
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-upload"></i> 上传并解析
+                            </button>
+                        </form>
+                    </div>
+                    <!-- 双文件对比 -->
+                    <div class="tab-pane fade" id="tab-dual" role="tabpanel">
+                        <form id="upload-form-dual" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label class="form-label">文件1（含 Q + A 两列）</label>
+                                <input type="file" name="file1" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">文件2（含 Q + A 两列）</label>
+                                <input type="file" name="file2" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                            </div>
+                            <div class="alert alert-info small">
+                                <strong>文件要求：</strong>每个文件包含 2 列（Question + Answer）<br>
+                                系统将按问题精确匹配后，对比两个文件中对应的答案
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-upload"></i> 上传并匹配
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <div id="upload-progress" class="mt-3 d-none">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                    </div>
+                    <p class="text-center mt-2">正在上传和解析...</p>
+                </div>
+            </div>
+        </div>
+
+        {% if not configs %}
+        <div class="alert alert-warning mt-3">
+            <i class="bi bi-exclamation-triangle"></i>
+            尚未配置大模型，请先 <a href="/config">配置大模型</a> 后再进行对比。
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 对比任务列表 -->
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-arrow-left-right"></i> 对比任务列表</h5>
+                <span class="badge bg-secondary">共 {{ tasks|length }} 个任务</span>
+            </div>
+            <div class="card-body">
+                {% if tasks %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>文件名</th>
+                                <th>格式</th>
+                                <th>条数</th>
+                                <th>已对比</th>
+                                <th>状态</th>
+                                <th>上传时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr>
+                                <td>
+                                    <a href="/similarity/{{ task.id }}">{{ task.original_name }}</a>
+                                    {% if task.upload_mode == 'dual' %}
+                                    <span class="badge bg-info">双文件</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="badge bg-secondary">{{ task.file_type|upper }}</span></td>
+                                <td>{{ task.record_count }}</td>
+                                <td>{{ task.compared_count }}</td>
+                                <td>
+                                    {% if task.status == 'completed' %}
+                                    <span class="badge bg-success">已完成</span>
+                                    {% elif task.status == 'running' %}
+                                    <span class="badge bg-warning">进行中</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">待对比</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    <a href="/similarity/{{ task.id }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="/api/export-similarity/{{ task.id }}" class="btn btn-sm btn-outline-success">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTask({{ task.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-2">暂无对比任务，请上传文件</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('upload-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var formData = new FormData(this);
+    var progress = document.getElementById('upload-progress');
+    progress.classList.remove('d-none');
+
+    fetch('/api/upload-similarity', { method: 'POST', body: formData })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            progress.classList.add('d-none');
+            if (data.error) {
+                showAlert(data.error, 'danger');
+            } else {
+                showAlert(data.message, 'success');
+                setTimeout(function() { location.href = '/similarity/' + data.id; }, 1000);
+            }
+        })
+        .catch(function(err) {
+            progress.classList.add('d-none');
+            showAlert('上传失败: ' + err.message, 'danger');
+        });
+});
+
+function deleteTask(taskId) {
+    if (!confirm('确定要删除这个对比任务吗？')) return;
+    fetch('/api/similarity/' + taskId, { method: 'DELETE' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            showAlert(data.message || data.error, data.error ? 'danger' : 'success');
+            if (!data.error) setTimeout(function() { location.reload(); }, 500);
+        });
+}
+
+// 双文件上传
+document.getElementById('upload-form-dual').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var formData = new FormData(this);
+    var progress = document.getElementById('upload-progress');
+    progress.classList.remove('d-none');
+
+    fetch('/api/upload-similarity-dual', { method: 'POST', body: formData })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            progress.classList.add('d-none');
+            if (data.error) {
+                showAlert(data.error, 'danger');
+            } else {
+                if (data.unmatched && data.unmatched.total > 0) {
+                    showAlert(data.message + '（文件1独有 ' + data.unmatched.only_in_file1 +
+                        ' 个，文件2独有 ' + data.unmatched.only_in_file2 + ' 个）', 'warning');
+                } else {
+                    showAlert(data.message, 'success');
+                }
+                setTimeout(function() { location.href = '/similarity/' + data.id; }, 1500);
+            }
+        })
+        .catch(function(err) {
+            progress.classList.add('d-none');
+            showAlert('上传失败: ' + err.message, 'danger');
+        });
+});
+</script>
+{% endblock %}

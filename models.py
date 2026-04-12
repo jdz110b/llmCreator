@@ -75,3 +75,40 @@ class PromptTemplate(db.Model):
     content = db.Column(db.Text, nullable=False)
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class SimilarityTask(db.Model):
+    """相似度对比任务"""
+    __tablename__ = 'similarity_task'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(500), nullable=False)
+    original_name = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(10), nullable=False)  # csv / txt / xlsx
+    record_count = db.Column(db.Integer, default=0)
+    compared_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='pending')  # pending / running / completed
+    # 双文件上传字段
+    upload_mode = db.Column(db.String(20), default='single')  # single / dual
+    filename2 = db.Column(db.String(500), nullable=True)
+    original_name2 = db.Column(db.String(500), nullable=True)
+    unmatched_count = db.Column(db.Integer, default=0)
+    unmatched_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    items = db.relationship('SimilarityItem', backref='similarity_task', lazy=True, cascade='all, delete-orphan')
+
+
+class SimilarityItem(db.Model):
+    """相似度对比条目"""
+    __tablename__ = 'similarity_item'
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('similarity_task.id'), nullable=False)
+    question = db.Column(db.Text, nullable=False)
+    answer1 = db.Column(db.Text, nullable=False)
+    answer2 = db.Column(db.Text, nullable=False)
+    answer1_cleaned = db.Column(db.Text, nullable=True)
+    answer2_cleaned = db.Column(db.Text, nullable=True)
+    similarity_score = db.Column(db.Float, nullable=True)  # 0-100
+    similarity_label = db.Column(db.String(20), nullable=True)  # high / medium / low
+    key_differences = db.Column(db.Text, nullable=True)
+    detail_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

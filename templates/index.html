@@ -20,16 +20,18 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">选择文件</label>
-                        <input type="file" name="file" class="form-control" accept=".csv,.txt" required>
-                        <div class="form-text">支持 CSV、TXT 格式，最大 50MB</div>
+                        <input type="file" name="file" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                        <div class="form-text">支持 CSV、TXT、Excel（xlsx/xls）格式，最大 50MB</div>
                     </div>
                     <div id="format-hint-question" class="alert alert-info small">
                         <strong>CSV 格式：</strong>含 question/q/问题 列<br>
-                        <strong>TXT 格式：</strong>每行一个问题
+                        <strong>TXT 格式：</strong>每行一个问题<br>
+                        <strong>Excel 格式：</strong>含 question/q/问题 列
                     </div>
                     <div id="format-hint-qa" class="alert alert-info small d-none">
                         <strong>CSV 格式：</strong>含 question 和 answer 列<br>
-                        <strong>TXT 格式：</strong>每行用 TAB 或 ||| 分隔问题和答案
+                        <strong>TXT 格式：</strong>每行用 TAB 或 ||| 分隔问题和答案<br>
+                        <strong>Excel 格式：</strong>含 question 和 answer 列
                     </div>
                     <button type="submit" class="btn btn-primary w-100">
                         <i class="bi bi-upload"></i> 上传并解析
