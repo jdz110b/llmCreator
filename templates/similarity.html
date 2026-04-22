@@ -159,7 +159,12 @@ document.getElementById('upload-form').addEventListener('submit', function(e) {
     progress.classList.remove('d-none');
 
     fetch('/api/upload-similarity', { method: 'POST', body: formData })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('json') === -1) {
+                throw new Error('服务器返回错误（状态码 ' + r.status + '），可能是文件过大');
+            }
+            return r.json();
+        })
         .then(function(data) {
             progress.classList.add('d-none');
             if (data.error) {
@@ -193,7 +198,12 @@ document.getElementById('upload-form-dual').addEventListener('submit', function(
     progress.classList.remove('d-none');
 
     fetch('/api/upload-similarity-dual', { method: 'POST', body: formData })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('json') === -1) {
+                throw new Error('服务器返回错误（状态码 ' + r.status + '），可能是文件过大');
+            }
+            return r.json();
+        })
         .then(function(data) {
             progress.classList.add('d-none');
             if (data.error) {

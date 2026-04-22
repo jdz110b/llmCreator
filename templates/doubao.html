@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}豆包批量查询 - 语料评测平台{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 上传区域 -->
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-robot"></i> 豆包批量查询</h5>
+            </div>
+            <div class="card-body">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">选择文件</label>
+                        <input type="file" name="file" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                        <div class="form-text">支持 CSV、TXT、Excel 格式，每行一个问题</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">豆包 Cookie</label>
+                        <textarea name="cookie_config" class="form-control" rows="4" 
+                                  placeholder="请粘贴从浏览器开发者工具中复制的豆包 Cookie 字符串" required></textarea>
+                        <div class="form-text">
+                            获取方式：登录 <a href="https://www.doubao.com" target="_blank">豆包网页版</a> → 
+                            按 F12 打开开发者工具 → Application → Cookies → 复制所有 Cookie 值
+                        </div>
+                    </div>
+                    <div class="alert alert-info small">
+                        <strong>文件格式：</strong>含 question/q/问题 列，每行一个查询<br>
+                        <strong>工作原理：</strong>系统将通过浏览器自动化逐条向豆包发送查询并获取回答
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-upload"></i> 上传并解析
+                    </button>
+                </form>
+                <div id="upload-progress" class="mt-3 d-none">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                    </div>
+                    <p class="text-center mt-2">正在上传和解析...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-list-task"></i> 查询任务列表</h5>
+                <span class="badge bg-secondary">共 {{ tasks|length }} 个任务</span>
+            </div>
+            <div class="card-body">
+                {% if tasks %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>文件名</th>
+                                <th>格式</th>
+                                <th>条数</th>
+                                <th>已完成</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr>
+                                <td>
+                                    <a href="/doubao/{{ task.id }}">{{ task.original_name }}</a>
+                                </td>
+                                <td><span class="badge bg-secondary">{{ task.file_type|upper }}</span></td>
+                                <td>{{ task.record_count }}</td>
+                                <td>{{ task.completed_count }}</td>
+                                <td>
+                                    {% if task.status == 'completed' %}
+                                    <span class="badge bg-success">已完成</span>
+                                    {% elif task.status == 'running' %}
+                                    <span class="badge bg-warning">进行中</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">待查询</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    <a href="/doubao/{{ task.id }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="/api/export-doubao/{{ task.id }}" class="btn btn-sm btn-outline-success">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTask({{ task.id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-2">暂无查询任务，请上传文件</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('upload-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var formData = new FormData(this);
+    var progress = document.getElementById('upload-progress');
+    progress.classList.remove('d-none');
+
+    fetch('/api/upload-doubao', { method: 'POST', body: formData })
+        .then(function(r) {
+            if (!r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('json') === -1) {
+                throw new Error('服务器返回错误（状态码 ' + r.status + '），可能是文件过大');
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            progress.classList.add('d-none');
+            if (data.error) {
+                showAlert(data.error, 'danger');
+            } else {
+                showAlert(data.message, 'success');
+                setTimeout(function() { location.href = '/doubao/' + data.id; }, 1000);
+            }
+        })
+        .catch(function(err) {
+            progress.classList.add('d-none');
+            showAlert('上传失败: ' + err.message, 'danger');
+        });
+});
+
+function deleteTask(taskId) {
+    if (!confirm('确定要删除这个查询任务吗？')) return;
+    fetch('/api/doubao/' + taskId, { method: 'DELETE' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            showAlert(data.message || data.error, data.error ? 'danger' : 'success');
+            if (!data.error) setTimeout(function() { location.reload(); }, 500);
+        });
+}
+</script>
+{% endblock %}

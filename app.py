@@ -8,7 +8,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, f
 from werkzeug.utils import secure_filename
 
 from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DATABASE_URI
-from models import db, LLMConfig, CorpusFile, CorpusItem, PromptTemplate, SimilarityTask, SimilarityItem
+from models import db, LLMConfig, CorpusFile, CorpusItem, PromptTemplate, SimilarityTask, SimilarityItem, DoubaoTask, DoubaoItem
 from services.file_parser import parse_file, parse_file_similarity, parse_file_qa, match_qa_files, allowed_file
 from services.llm_service import LLMService
 from services.classifier import (
@@ -32,6 +32,22 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 db.init_app(app)
+
+
+# API 请求返回 JSON 格式的错误，避免前端 fetch 解析 HTML 报错
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({'error': '文件太大，最大支持 50MB'}), 413
+
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'error': f'请求错误: {e.description}'}), 400
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({'error': '服务器内部错误，请稍后重试'}), 500
 
 def _auto_migrate(engine):
     """自动检测并添加缺失的数据库列，避免因 schema 变更需要删库重建"""
@@ -252,8 +268,9 @@ def upload_file():
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS):
         return jsonify({'error': f'不支持的文件格式，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
 
-    original_name = secure_filename(file.filename)
-    ext = original_name.rsplit('.', 1)[1].lower()
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if not ext:
+        return jsonify({'error': '无法识别文件扩展名'}), 400
     filename = f"{uuid.uuid4().hex}.{ext}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
@@ -627,8 +644,9 @@ def upload_similarity():
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS):
         return jsonify({'error': f'不支持的文件格式，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
 
-    original_name = secure_filename(file.filename)
-    ext = original_name.rsplit('.', 1)[1].lower()
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if not ext:
+        return jsonify({'error': '无法识别文件扩展名'}), 400
     filename = f"{uuid.uuid4().hex}.{ext}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
@@ -688,8 +706,8 @@ def upload_similarity_dual():
             return jsonify({'error': f'不支持的文件格式（{f.filename}），仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
 
     # 保存两个文件
-    ext1 = file1.filename.rsplit('.', 1)[1].lower()
-    ext2 = file2.filename.rsplit('.', 1)[1].lower()
+    ext1 = file1.filename.rsplit('.', 1)[-1].lower() if '.' in file1.filename else ''
+    ext2 = file2.filename.rsplit('.', 1)[-1].lower() if '.' in file2.filename else ''
     fname1 = f"{uuid.uuid4().hex}.{ext1}"
     fname2 = f"{uuid.uuid4().hex}.{ext2}"
     fpath1 = os.path.join(app.config['UPLOAD_FOLDER'], fname1)
@@ -920,6 +938,226 @@ def export_similarity(task_id):
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded}"}
     )
+
+
+# ==================== 豆包批量查询 API ====================
+
+@app.route('/doubao')
+def doubao_page():
+    tasks = DoubaoTask.query.order_by(DoubaoTask.created_at.desc()).all()
+    return render_template('doubao.html', tasks=tasks)
+
+
+@app.route('/doubao/<int:task_id>')
+def doubao_detail(task_id):
+    task = DoubaoTask.query.get_or_404(task_id)
+    items = DoubaoItem.query.filter_by(task_id=task_id).all()
+    return render_template('doubao_detail.html', task=task, items=items)
+
+
+@app.route('/api/upload-doubao', methods=['POST'])
+def upload_doubao():
+    """上传豆包批量查询文件"""
+    if 'file' not in request.files:
+        return jsonify({'error': '没有选择文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': '没有选择文件'}), 400
+
+    cookie_config = request.form.get('cookie_config', '').strip()
+    if not cookie_config:
+        return jsonify({'error': '请提供豆包 Cookie'}), 400
+
+    if not allowed_file(file.filename, ALLOWED_EXTENSIONS):
+        return jsonify({'error': f'不支持的文件格式，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if not ext:
+        return jsonify({'error': '无法识别文件扩展名'}), 400
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+
+    try:
+        items = parse_file(filepath, 'question')
+        if not items:
+            os.remove(filepath)
+            return jsonify({'error': '文件解析失败或文件为空，请确保包含 question/q/问题 列'}), 400
+
+        task = DoubaoTask(
+            filename=filename,
+            original_name=file.filename,
+            file_type=ext,
+            record_count=len(items),
+            cookie_config=cookie_config,
+        )
+        db.session.add(task)
+        db.session.flush()
+
+        for item_data in items:
+            item = DoubaoItem(
+                task_id=task.id,
+                question=item_data['question'],
+            )
+            db.session.add(item)
+
+        db.session.commit()
+        return jsonify({
+            'id': task.id,
+            'message': f'上传成功，解析到 {len(items)} 条查询',
+            'count': len(items),
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'解析失败: {str(e)}'}), 500
+
+
+@app.route('/api/doubao-query-stream', methods=['POST'])
+def doubao_query_stream():
+    """流式执行豆包查询"""
+    from flask import Response, stream_with_context
+
+    data = request.get_json(force=True, silent=True) or {}
+    task_id = data.get('task_id')
+    cookie_config = data.get('cookie_config', '')
+    item_ids = data.get('item_ids', [])
+
+    def generate():
+        browser = None
+        try:
+            task = DoubaoTask.query.get(task_id)
+            if not task:
+                yield f"data: {json.dumps({'error': '任务不存在'})}\n\n"
+                return
+
+            # 优先使用传入的 cookie，否则使用任务保存的
+            cookies = cookie_config or task.cookie_config
+            if not cookies:
+                yield f"data: {json.dumps({'error': '请提供豆包 Cookie'})}\n\n"
+                return
+
+            task.status = 'running'
+            db.session.commit()
+
+            if item_ids:
+                items = DoubaoItem.query.filter(DoubaoItem.id.in_(item_ids)).all()
+            else:
+                items = DoubaoItem.query.filter_by(task_id=task_id).all()
+
+            total = len(items)
+
+            # 初始化浏览器
+            try:
+                from services.doubao_browser import DoubaoBrowser
+                browser = DoubaoBrowser(cookies)
+            except Exception as e:
+                yield f"data: {json.dumps({'error': f'浏览器初始化失败: {str(e)}'})}\n\n"
+                task.status = 'pending'
+                db.session.commit()
+                return
+
+            completed = 0
+            for i, item in enumerate(items, 1):
+                try:
+                    answer = browser.query(item.question, timeout=120)
+                    item.answer = answer
+                    item.status = 'success'
+                    completed += 1
+                    task.completed_count = completed
+                    db.session.commit()
+
+                    yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': {'answer': answer[:200] + '...' if len(answer) > 200 else answer}})}\n\n"
+                except Exception as e:
+                    item.status = 'error'
+                    item.error_msg = str(e)
+                    db.session.commit()
+                    yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+
+            task.status = 'completed'
+            db.session.commit()
+            yield f"data: {json.dumps({'status': 'done', 'message': f'查询完成，成功 {completed}/{total} 条'})}\n\n"
+
+        except Exception as outer_err:
+            import traceback
+            yield f"data: {json.dumps({'error': f'查询异常: {str(outer_err)}', 'traceback': traceback.format_exc()})}\n\n"
+        finally:
+            if browser:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/api/export-doubao/<int:task_id>')
+def export_doubao(task_id):
+    """导出豆包查询结果为 Excel"""
+    import io
+    from flask import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from urllib.parse import quote
+
+    task = DoubaoTask.query.get_or_404(task_id)
+    items = DoubaoItem.query.filter_by(task_id=task_id).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '豆包查询结果'
+
+    headers = ['ID', '问题', '豆包回答', '状态', '错误信息']
+    ws.append(headers)
+
+    header_font = Font(bold=True, color='FFFFFF', size=11)
+    header_fill = PatternFill(start_color='344955', end_color='344955', fill_type='solid')
+    thin_border = Border(bottom=Side(style='thin', color='CCCCCC'))
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for idx, item in enumerate(items, 1):
+        status_display = {'pending': '待查询', 'success': '成功', 'error': '失败'}.get(item.status, item.status)
+        ws.append([
+            idx, item.question, item.answer or '',
+            status_display, item.error_msg or '',
+        ])
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+
+    col_widths = [6, 40, 60, 10, 30]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = os.path.splitext(task.original_name)[0] + '_豆包查询结果.xlsx'
+    encoded = quote(filename)
+    return Response(
+        output.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded}"}
+    )
+
+
+@app.route('/api/doubao/<int:task_id>', methods=['DELETE'])
+def delete_doubao(task_id):
+    """删除豆包查询任务"""
+    task = DoubaoTask.query.get_or_404(task_id)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], task.filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    db.session.delete(task)
+    db.session.commit()
+    return jsonify({'message': '删除成功'})
 
 
 if __name__ == '__main__':

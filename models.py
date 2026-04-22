@@ -112,3 +112,30 @@ class SimilarityItem(db.Model):
     key_differences = db.Column(db.Text, nullable=True)
     detail_json = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class DoubaoTask(db.Model):
+    """豆包批量查询任务"""
+    __tablename__ = 'doubao_task'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(500), nullable=False)
+    original_name = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(10), nullable=False)
+    record_count = db.Column(db.Integer, default=0)
+    completed_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='pending')  # pending / running / completed
+    cookie_config = db.Column(db.Text, nullable=True)  # 用户提供的豆包 Cookie
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    items = db.relationship('DoubaoItem', backref='doubao_task', lazy=True, cascade='all, delete-orphan')
+
+
+class DoubaoItem(db.Model):
+    """豆包查询条目"""
+    __tablename__ = 'doubao_item'
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('doubao_task.id'), nullable=False)
+    question = db.Column(db.Text, nullable=False)
+    answer = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default='pending')  # pending / success / error
+    error_msg = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
