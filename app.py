@@ -12,10 +12,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 from werkzeug.utils import secure_filename
 
-from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DATABASE_URI
+from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DATABASE_URI, DOUBAO_PROFILE_DIR, DOUBAO_LOGIN_TIMEOUT, LLM_CONCURRENCY
 from models import db, LLMConfig, CorpusFile, CorpusItem, PromptTemplate, SimilarityTask, SimilarityItem, DoubaoTask, DoubaoItem
 from services.file_parser import parse_file, parse_file_similarity, parse_file_qa, match_qa_files, allowed_file
 from services.llm_service import LLMService
+from services.task_executor import execute_parallel_batch
 from services.classifier import (
     classify_subjective_objective, classify_difficulty,
     classify_category, generate_objective_answer,
@@ -28,6 +29,10 @@ from services.classifier import (
 )
 from services.scorer import score_answer, clean_answer_v2, DEFAULT_SCORE_PROMPT
 from services.comparator import compare_similarity, DEFAULT_SIMILARITY_COMPARE_PROMPT
+from services.doubao_auth import DoubaoAuthManager
+
+# 豆包认证管理器（单例）
+doubao_auth = DoubaoAuthManager(user_data_dir=DOUBAO_PROFILE_DIR, login_timeout=DOUBAO_LOGIN_TIMEOUT)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'corpus-eval-platform-secret'
@@ -329,7 +334,7 @@ def delete_corpus(file_id):
 # ----- 分类与评测 -----
 @app.route('/api/classify-stream', methods=['POST'])
 def classify_items_stream():
-    """流式分类语料（每处理一行就返回结果）"""
+    """流式分类语料（支持并行调用、重试、暂停恢复）"""
     from flask import Response, stream_with_context
 
     # 在生成器外读取请求数据，避免请求上下文问题
@@ -341,9 +346,14 @@ def classify_items_stream():
     categories = data.get('categories', '')
     prompt_id = data.get('prompt_id')
     item_ids = data.get('item_ids', [])
+    try:
+        concurrency = int(data.get('concurrency', LLM_CONCURRENCY))
+    except (TypeError, ValueError):
+        concurrency = LLM_CONCURRENCY
 
     logger.info(f"[分类流] 开始: classify_type={classify_type}, classify_types={classify_types}, "
-                f"config_id={config_id}, prompt_id={prompt_id}, file_id={file_id}, item_ids数量={len(item_ids)}")
+                f"config_id={config_id}, prompt_id={prompt_id}, file_id={file_id}, "
+                f"item_ids数量={len(item_ids)}, 并行数={concurrency}")
 
     def generate():
       try:
@@ -374,64 +384,75 @@ def classify_items_stream():
             yield f"data: {json.dumps({'error': '没有找到待处理的条目'})}\n\n"
             return
 
-        for i, item in enumerate(items, 1):
-            try:
-                logger.info(f"[分类流] 处理第 {i}/{total} 条 (item_id={item.id}): {item.question[:50]}...")
-                res = {}
+        # 发送 init 事件，供前端暂停恢复使用
+        item_id_list = [item.id for item in items]
+        yield f"data: {json.dumps({'status': 'init', 'total': total, 'item_ids': item_id_list})}\n\n"
 
-                if classify_type == 'combined':
-                    res = classify_combined(llm, item.question, categories, custom_prompt)
+        # 预缓存 ORM 属性到普通 Python 属性，避免 commit 后线程不安全的延迟加载
+        for item in items:
+            item._q = item.question
+
+        def do_classify(item):
+            """纯 LLM 调用（在子线程中执行，不操作数据库）"""
+            q = item._q
+            if classify_type == 'combined':
+                return ('combined', classify_combined(llm, q, categories, custom_prompt))
+            elif classify_type == 'subj_obj':
+                res = classify_subjective_objective(llm, q, custom_prompt)
+                if res.get('type') == 'objective':
+                    try:
+                        ans_res = generate_objective_answer(llm, q)
+                        res['_objective_answer'] = ans_res.get('answer', '')
+                    except Exception:
+                        pass
+                return ('subj_obj', res)
+            elif classify_type == 'difficulty':
+                return ('difficulty', classify_difficulty(llm, q, custom_prompt))
+            elif classify_type == 'category':
+                return ('category', classify_category(llm, q, categories, custom_prompt))
+            elif classify_type == 'quality':
+                return ('quality', evaluate_quality(llm, q, custom_prompt))
+            elif classify_type == 'domain':
+                return ('domain', classify_domain(llm, q, custom_prompt))
+            elif classify_type == 'intent':
+                return ('intent', classify_intent(llm, q, custom_prompt))
+            else:
+                raise ValueError(f'未知分类类型: {classify_type}')
+
+        for idx, item, result, error in execute_parallel_batch(items, do_classify, concurrency):
+            if error:
+                db.session.rollback()
+                logger.error(f"[分类流] 第 {idx}/{total} 条处理失败 (item_id={item.id}): {str(error)}")
+                logger.error(''.join(traceback.format_exception(type(error), error, error.__traceback__)))
+                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(error), 'progress': idx, 'total': total})}\n\n"
+            else:
+                ctype, res = result
+                # 在主线程中写入数据库
+                if ctype == 'combined':
                     _apply_combined_result(item, res, classify_types, categories)
-
-                elif classify_type == 'subj_obj':
-                    res = classify_subjective_objective(llm, item.question, custom_prompt)
+                elif ctype == 'subj_obj':
                     item.subj_obj = res.get('type', '')
-                    if item.subj_obj == 'objective':
-                        try:
-                            ans_res = generate_objective_answer(llm, item.question)
-                            item.objective_answer = ans_res.get('answer', '')
-                        except Exception:
-                            pass
-
-                elif classify_type == 'difficulty':
-                    res = classify_difficulty(llm, item.question, custom_prompt)
+                    if res.get('_objective_answer'):
+                        item.objective_answer = res['_objective_answer']
+                elif ctype == 'difficulty':
                     item.difficulty = res.get('difficulty', '')
-
-                elif classify_type == 'category':
-                    res = classify_category(llm, item.question, categories, custom_prompt)
+                elif ctype == 'category':
                     item.category = res.get('category', '')
-
-                elif classify_type == 'quality':
-                    res = evaluate_quality(llm, item.question, custom_prompt)
+                elif ctype == 'quality':
                     item.quality_score = float(res.get('quality_score', 0))
                     item.quality_label = res.get('quality_label', '')
                     item.quality_detail = json.dumps(res, ensure_ascii=False)
-
-                elif classify_type == 'domain':
-                    res = classify_domain(llm, item.question, custom_prompt)
+                elif ctype == 'domain':
                     item.domain = res.get('domain', '')
                     item.sub_domain = res.get('sub_domain', '')
-
-                elif classify_type == 'intent':
-                    res = classify_intent(llm, item.question, custom_prompt)
+                elif ctype == 'intent':
                     item.intent = res.get('intent', '')
                     item.intent_cn = res.get('intent_cn', '')
                     item.intent_confidence = float(res.get('confidence', 0))
 
-                else:
-                    logger.warning(f"[分类流] 未知的分类类型: {classify_type}")
-                    yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': f'未知分类类型: {classify_type}', 'progress': i, 'total': total})}\n\n"
-                    continue
-
                 db.session.commit()
-                logger.info(f"[分类流] 第 {i}/{total} 条处理成功")
-                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': res})}\n\n"
-
-            except Exception as e:
-                db.session.rollback()
-                logger.error(f"[分类流] 第 {i}/{total} 条处理失败 (item_id={item.id}): {str(e)}")
-                logger.error(traceback.format_exc())
-                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+                logger.info(f"[分类流] 第 {idx}/{total} 条处理成功")
+                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': idx, 'total': total, 'data': res})}\n\n"
 
         yield f"data: {json.dumps({'status': 'done', 'message': f'分类完成，共 {total} 条'})}\n\n"
       except Exception as outer_err:
@@ -611,6 +632,86 @@ def score_items():
         'results': results,
         'errors': errors,
     })
+
+
+@app.route('/api/score-stream', methods=['POST'])
+def score_items_stream():
+    """流式打分（支持并行调用、重试、暂停恢复）"""
+    from flask import Response, stream_with_context
+
+    data = request.get_json(force=True, silent=True) or {}
+    file_id = data.get('file_id')
+    config_id = data.get('config_id')
+    prompt_id = data.get('prompt_id')
+    item_ids = data.get('item_ids', [])
+    try:
+        concurrency = int(data.get('concurrency', LLM_CONCURRENCY))
+    except (TypeError, ValueError):
+        concurrency = LLM_CONCURRENCY
+
+    logger.info(f"[打分流] 开始: config_id={config_id}, prompt_id={prompt_id}, "
+                f"file_id={file_id}, item_ids数量={len(item_ids)}, 并行数={concurrency}")
+
+    def generate():
+      try:
+        llm = get_llm_service(config_id)
+        if not llm:
+            yield f"data: {json.dumps({'error': '请先配置大模型'})}\n\n"
+            return
+
+        custom_prompt = None
+        if prompt_id:
+            tpl = PromptTemplate.query.get(prompt_id)
+            if tpl:
+                custom_prompt = tpl.content
+
+        if item_ids:
+            items = CorpusItem.query.filter(CorpusItem.id.in_(item_ids)).all()
+        else:
+            items = CorpusItem.query.filter_by(file_id=file_id).all()
+
+        # 过滤掉没有 answer 的条目
+        scorable_items = [item for item in items if item.answer]
+        total = len(scorable_items)
+        logger.info(f"[打分流] 待打分条目: {total} 条")
+
+        if total == 0:
+            yield f"data: {json.dumps({'error': '没有找到有答案的条目'})}\n\n"
+            return
+
+        # 发送 init 事件
+        item_id_list = [item.id for item in scorable_items]
+        yield f"data: {json.dumps({'status': 'init', 'total': total, 'item_ids': item_id_list})}\n\n"
+
+        # 预缓存 ORM 属性到普通 Python 属性，避免 commit 后线程不安全的延迟加载
+        for item in scorable_items:
+            item._q = item.question
+            item._a = item.answer
+
+        def do_score(item):
+            """纯 LLM 调用（在子线程中执行）"""
+            return score_answer(llm, item._q, item._a, custom_prompt)
+
+        for idx, item, result, error in execute_parallel_batch(scorable_items, do_score, concurrency):
+            if error:
+                db.session.rollback()
+                logger.error(f"[打分流] 第 {idx}/{total} 条处理失败 (item_id={item.id}): {str(error)}")
+                logger.error(''.join(traceback.format_exception(type(error), error, error.__traceback__)))
+                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(error), 'progress': idx, 'total': total})}\n\n"
+            else:
+                item.answer_score = float(result.get('score', 0))
+                item.score_reason = result.get('reason', '')
+                db.session.commit()
+                logger.info(f"[打分流] 第 {idx}/{total} 条处理成功")
+                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': idx, 'total': total, 'data': {'score': item.answer_score, 'reason': item.score_reason}})}\n\n"
+
+        yield f"data: {json.dumps({'status': 'done', 'message': f'打分完成，共 {total} 条'})}\n\n"
+      except Exception as outer_err:
+        logger.error(f"[打分流] 生成器异常: {str(outer_err)}")
+        logger.error(traceback.format_exc())
+        yield f"data: {json.dumps({'error': f'打分异常: {str(outer_err)}'})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 
 @app.route('/api/export/<int:file_id>')
@@ -871,7 +972,7 @@ def delete_similarity(task_id):
 
 @app.route('/api/similarity-compare-stream', methods=['POST'])
 def similarity_compare_stream():
-    """流式相似度对比"""
+    """流式相似度对比（支持并行调用、重试、暂停恢复）"""
     from flask import Response, stream_with_context
 
     # 在生成器外部预先解析请求数据，避免生成器内部读取不到请求体
@@ -880,6 +981,10 @@ def similarity_compare_stream():
     config_id = data.get('config_id')
     prompt_id = data.get('prompt_id')
     item_ids = data.get('item_ids', [])
+    try:
+        concurrency = int(data.get('concurrency', LLM_CONCURRENCY))
+    except (TypeError, ValueError):
+        concurrency = LLM_CONCURRENCY
 
     def generate():
       try:
@@ -907,40 +1012,66 @@ def similarity_compare_stream():
         else:
             items = SimilarityItem.query.filter_by(task_id=task_id).all()
 
+        # 预先过滤掉空答案的条目，记录 skip
+        processable_items = []
+        skip_count = 0
+        for item in items:
+            a1 = item.answer1_cleaned or clean_answer_v2(item.answer1 or '')
+            a2 = item.answer2_cleaned or clean_answer_v2(item.answer2 or '')
+            if not a1.strip() and not a2.strip():
+                skip_count += 1
+                continue
+            # 缓存清洗后的答案供子线程使用
+            item._clean_a1 = a1
+            item._clean_a2 = a2
+            # 预缓存 ORM 属性，避免 commit 后线程不安全的延迟加载
+            item._q = item.question
+            processable_items.append(item)
+
         total = len(items)
+        processable_total = len(processable_items)
+
+        # 发送 init 事件（仅包含实际需要处理的条目，不含 skip 的）
+        item_id_list = [item.id for item in processable_items]
+        yield f"data: {json.dumps({'status': 'init', 'total': processable_total, 'item_ids': item_id_list})}\n\n"
+
+        # 发送 skip 事件
+        if skip_count > 0:
+            logger.info(f"[相似度对比] 跳过 {skip_count} 条空答案条目")
+
+        def do_compare(item):
+            """纯 LLM 调用（在子线程中执行）"""
+            return compare_similarity(llm, item._q, item._clean_a1, item._clean_a2, custom_prompt)
+
         completed = 0
-        for i, item in enumerate(items, 1):
-            try:
-                a1 = item.answer1_cleaned or clean_answer_v2(item.answer1)
-                a2 = item.answer2_cleaned or clean_answer_v2(item.answer2)
 
-                if not a1.strip() and not a2.strip():
-                    yield f"data: {json.dumps({'status': 'skip', 'item_id': item.id, 'progress': i, 'total': total})}\n\n"
-                    continue
-
-                res = compare_similarity(llm, item.question, a1, a2, custom_prompt)
-                item.similarity_score = float(res.get('similarity_score', 0))
-                item.similarity_label = res.get('similarity_label', '')
-                kd = res.get('key_differences', '')
+        for idx, item, result, error in execute_parallel_batch(processable_items, do_compare, concurrency):
+            if error:
+                db.session.rollback()
+                logger.error(f"[相似度对比] 第 {idx}/{processable_total} 条处理失败 (item_id={item.id}): {str(error)}")
+                logger.error(''.join(traceback.format_exception(type(error), error, error.__traceback__)))
+                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(error), 'progress': idx, 'total': processable_total})}\n\n"
+            else:
+                item.similarity_score = float(result.get('similarity_score', 0))
+                item.similarity_label = result.get('similarity_label', '')
+                kd = result.get('key_differences', '')
                 if isinstance(kd, list):
                     kd = '；'.join(str(x) for x in kd)
                 item.key_differences = str(kd) if kd else ''
-                item.detail_json = json.dumps(res, ensure_ascii=False)
+                item.detail_json = json.dumps(result, ensure_ascii=False)
                 completed += 1
                 task.compared_count = completed
                 db.session.commit()
 
-                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': {'similarity_score': item.similarity_score, 'similarity_label': item.similarity_label, 'key_differences': item.key_differences}})}\n\n"
-            except Exception as e:
-                db.session.rollback()
-                yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': idx, 'total': processable_total, 'data': {'similarity_score': item.similarity_score, 'similarity_label': item.similarity_label, 'key_differences': item.key_differences}})}\n\n"
 
         task.status = 'completed'
         db.session.commit()
-        yield f"data: {json.dumps({'status': 'done', 'message': f'对比完成，共 {completed}/{total} 条'})}\n\n"
+        yield f"data: {json.dumps({'status': 'done', 'message': f'对比完成，共 {completed}/{processable_total} 条'})}\n\n"
       except Exception as outer_err:
-        import traceback
-        yield f"data: {json.dumps({'error': f'生成器异常: {str(outer_err)}', 'traceback': traceback.format_exc()})}\n\n"
+        logger.error(f"[相似度对比] 生成器异常: {str(outer_err)}")
+        logger.error(traceback.format_exc())
+        yield f"data: {json.dumps({'error': f'生成器异常: {str(outer_err)}'})}\n\n"
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
@@ -1016,14 +1147,16 @@ def export_similarity(task_id):
 @app.route('/doubao')
 def doubao_page():
     tasks = DoubaoTask.query.order_by(DoubaoTask.created_at.desc()).all()
-    return render_template('doubao.html', tasks=tasks)
+    auth_status = doubao_auth.check_status()
+    return render_template('doubao.html', tasks=tasks, logged_in=auth_status['logged_in'], auth_state=auth_status['state'])
 
 
 @app.route('/doubao/<int:task_id>')
 def doubao_detail(task_id):
     task = DoubaoTask.query.get_or_404(task_id)
     items = DoubaoItem.query.filter_by(task_id=task_id).all()
-    return render_template('doubao_detail.html', task=task, items=items)
+    auth_status = doubao_auth.check_status()
+    return render_template('doubao_detail.html', task=task, items=items, logged_in=auth_status['logged_in'], auth_state=auth_status['state'])
 
 
 @app.route('/api/upload-doubao', methods=['POST'])
@@ -1035,10 +1168,6 @@ def upload_doubao():
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': '没有选择文件'}), 400
-
-    cookie_config = request.form.get('cookie_config', '').strip()
-    if not cookie_config:
-        return jsonify({'error': '请提供豆包 Cookie'}), 400
 
     if not allowed_file(file.filename, ALLOWED_EXTENSIONS):
         return jsonify({'error': f'不支持的文件格式，仅支持: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
@@ -1061,7 +1190,6 @@ def upload_doubao():
             original_name=file.filename,
             file_type=ext,
             record_count=len(items),
-            cookie_config=cookie_config,
         )
         db.session.add(task)
         db.session.flush()
@@ -1091,7 +1219,6 @@ def doubao_query_stream():
 
     data = request.get_json(force=True, silent=True) or {}
     task_id = data.get('task_id')
-    cookie_config = data.get('cookie_config', '')
     item_ids = data.get('item_ids', [])
 
     def generate():
@@ -1102,10 +1229,8 @@ def doubao_query_stream():
                 yield f"data: {json.dumps({'error': '任务不存在'})}\n\n"
                 return
 
-            # 优先使用传入的 cookie，否则使用任务保存的
-            cookies = cookie_config or task.cookie_config
-            if not cookies:
-                yield f"data: {json.dumps({'error': '请提供豆包 Cookie'})}\n\n"
+            if not doubao_auth.is_logged_in():
+                yield f"data: {json.dumps({'error': '请先登录豆包'})}\n\n"
                 return
 
             task.status = 'running'
@@ -1118,10 +1243,10 @@ def doubao_query_stream():
 
             total = len(items)
 
-            # 初始化浏览器
+            # 初始化浏览器（使用登录持久化上下文）
             try:
                 from services.doubao_browser import DoubaoBrowser
-                browser = DoubaoBrowser(cookies)
+                browser = DoubaoBrowser(doubao_auth)
             except Exception as e:
                 yield f"data: {json.dumps({'error': f'浏览器初始化失败: {str(e)}'})}\n\n"
                 task.status = 'pending'
@@ -1140,10 +1265,15 @@ def doubao_query_stream():
 
                     yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': {'answer': answer[:200] + '...' if len(answer) > 200 else answer}})}\n\n"
                 except Exception as e:
+                    error_msg = str(e)
                     item.status = 'error'
-                    item.error_msg = str(e)
+                    item.error_msg = error_msg
                     db.session.commit()
-                    yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+                    # 检测登录过期
+                    if '登录' in error_msg or '过期' in error_msg:
+                        yield f"data: {json.dumps({'status': 'session_expired', 'error': '豆包登录已过期，请重新登录', 'progress': i, 'total': total})}\n\n"
+                        break
+                    yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': error_msg, 'progress': i, 'total': total})}\n\n"
 
             task.status = 'completed'
             db.session.commit()
@@ -1229,6 +1359,36 @@ def delete_doubao(task_id):
     db.session.delete(task)
     db.session.commit()
     return jsonify({'message': '删除成功'})
+
+
+@app.route('/api/doubao-login', methods=['POST'])
+def doubao_login():
+    """启动豆包登录流程"""
+    result = doubao_auth.start_login()
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route('/api/doubao-login-status')
+def doubao_login_status():
+    """查询豆包登录状态"""
+    return jsonify(doubao_auth.check_status())
+
+
+@app.route('/api/doubao-cancel-login', methods=['POST'])
+def doubao_cancel_login():
+    """取消豆包登录"""
+    return jsonify(doubao_auth.cancel_login())
+
+
+@app.route('/api/doubao-logout', methods=['POST'])
+def doubao_logout():
+    """退出豆包登录"""
+    result = doubao_auth.logout()
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 if __name__ == '__main__':

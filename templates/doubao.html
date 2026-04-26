@@ -5,6 +5,43 @@
 <div class="row">
     <!-- 上传区域 -->
     <div class="col-md-5">
+        <!-- 登录状态卡片 -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5><i class="bi bi-key"></i> 豆包登录</h5>
+            </div>
+            <div class="card-body">
+                <div id="auth-status">
+                    {% if auth_state == 'logging_in' %}
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="spinner-border spinner-border-sm text-warning me-2" role="status"></div>
+                        <span class="text-warning fw-bold">登录中</span>
+                    </div>
+                    <p class="text-muted small mb-2">请在弹出的浏览器窗口中完成豆包登录...</p>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="cancelLogin()">
+                        <i class="bi bi-x-circle"></i> 取消登录
+                    </button>
+                    {% elif logged_in %}
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-success me-2"><i class="bi bi-check-circle"></i> 已登录</span>
+                    </div>
+                    <button class="btn btn-outline-danger btn-sm" onclick="doLogout()">
+                        <i class="bi bi-box-arrow-right"></i> 退出登录
+                    </button>
+                    {% else %}
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-secondary me-2"><i class="bi bi-exclamation-circle"></i> 未登录</span>
+                    </div>
+                    <p class="text-muted small mb-2">点击下方按钮，在弹出的浏览器窗口中登录豆包账号</p>
+                    <button class="btn btn-primary btn-sm" onclick="startLogin()">
+                        <i class="bi bi-box-arrow-in-right"></i> 登录豆包
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 上传表单 -->
         <div class="card">
             <div class="card-header">
                 <h5><i class="bi bi-robot"></i> 豆包批量查询</h5>
@@ -16,20 +53,11 @@
                         <input type="file" name="file" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
                         <div class="form-text">支持 CSV、TXT、Excel 格式，每行一个问题</div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">豆包 Cookie</label>
-                        <textarea name="cookie_config" class="form-control" rows="4" 
-                                  placeholder="请粘贴从浏览器开发者工具中复制的豆包 Cookie 字符串" required></textarea>
-                        <div class="form-text">
-                            获取方式：登录 <a href="https://www.doubao.com" target="_blank">豆包网页版</a> → 
-                            按 F12 打开开发者工具 → Application → Cookies → 复制所有 Cookie 值
-                        </div>
-                    </div>
                     <div class="alert alert-info small">
                         <strong>文件格式：</strong>含 question/q/问题 列，每行一个查询<br>
                         <strong>工作原理：</strong>系统将通过浏览器自动化逐条向豆包发送查询并获取回答
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">
+                    <button type="submit" class="btn btn-primary w-100" id="upload-btn">
                         <i class="bi bi-upload"></i> 上传并解析
                     </button>
                 </form>
@@ -114,6 +142,8 @@
 
 {% block scripts %}
 <script>
+var loginPollTimer = null;
+
 document.getElementById('upload-form').addEventListener('submit', function(e) {
     e.preventDefault();
     var formData = new FormData(this);
@@ -141,6 +171,94 @@ document.getElementById('upload-form').addEventListener('submit', function(e) {
             showAlert('上传失败: ' + err.message, 'danger');
         });
 });
+
+function startLogin() {
+    fetch('/api/doubao-login', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                showAlert(data.error, 'danger');
+                return;
+            }
+            updateAuthUI('logging_in');
+            startLoginPoll();
+        })
+        .catch(function(err) {
+            showAlert('启动登录失败: ' + err.message, 'danger');
+        });
+}
+
+function startLoginPoll() {
+    if (loginPollTimer) clearInterval(loginPollTimer);
+    loginPollTimer = setInterval(function() {
+        fetch('/api/doubao-login-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.state === 'ready') {
+                    clearInterval(loginPollTimer);
+                    loginPollTimer = null;
+                    updateAuthUI('ready');
+                    showAlert('豆包登录成功', 'success');
+                } else if (data.state === 'idle') {
+                    clearInterval(loginPollTimer);
+                    loginPollTimer = null;
+                    updateAuthUI('idle');
+                }
+            });
+    }, 2000);
+}
+
+function cancelLogin() {
+    fetch('/api/doubao-cancel-login', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function() {
+            if (loginPollTimer) { clearInterval(loginPollTimer); loginPollTimer = null; }
+            updateAuthUI('idle');
+        });
+}
+
+function doLogout() {
+    if (!confirm('确定要退出豆包登录吗？')) return;
+    fetch('/api/doubao-logout', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                showAlert(data.error, 'danger');
+            } else {
+                updateAuthUI('idle');
+                showAlert('已退出登录', 'success');
+            }
+        });
+}
+
+function updateAuthUI(state) {
+    var container = document.getElementById('auth-status');
+    if (state === 'logging_in') {
+        container.innerHTML =
+            '<div class="d-flex align-items-center mb-2">' +
+                '<div class="spinner-border spinner-border-sm text-warning me-2" role="status"></div>' +
+                '<span class="text-warning fw-bold">登录中</span>' +
+            '</div>' +
+            '<p class="text-muted small mb-2">请在弹出的浏览器窗口中完成豆包登录...</p>' +
+            '<button class="btn btn-outline-secondary btn-sm" onclick="cancelLogin()">' +
+                '<i class="bi bi-x-circle"></i> 取消登录</button>';
+    } else if (state === 'ready') {
+        container.innerHTML =
+            '<div class="d-flex align-items-center mb-2">' +
+                '<span class="badge bg-success me-2"><i class="bi bi-check-circle"></i> 已登录</span>' +
+            '</div>' +
+            '<button class="btn btn-outline-danger btn-sm" onclick="doLogout()">' +
+                '<i class="bi bi-box-arrow-right"></i> 退出登录</button>';
+    } else {
+        container.innerHTML =
+            '<div class="d-flex align-items-center mb-2">' +
+                '<span class="badge bg-secondary me-2"><i class="bi bi-exclamation-circle"></i> 未登录</span>' +
+            '</div>' +
+            '<p class="text-muted small mb-2">点击下方按钮，在弹出的浏览器窗口中登录豆包账号</p>' +
+            '<button class="btn btn-primary btn-sm" onclick="startLogin()">' +
+                '<i class="bi bi-box-arrow-in-right"></i> 登录豆包</button>';
+    }
+}
 
 function deleteTask(taskId) {
     if (!confirm('确定要删除这个查询任务吗？')) return;

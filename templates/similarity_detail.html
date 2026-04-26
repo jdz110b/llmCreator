@@ -115,10 +115,23 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-6 d-flex align-items-end">
-                <button class="btn btn-primary" onclick="startCompare()">
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button id="btn-compare" class="btn btn-primary" onclick="startCompare()">
                     <i class="bi bi-play-fill"></i> 开始对比
                 </button>
+                <button id="btn-pause" class="btn btn-warning d-none" onclick="pauseCompare()">
+                    <i class="bi bi-pause-fill"></i> 暂停
+                </button>
+                <button id="btn-resume" class="btn btn-success d-none" onclick="resumeCompare()">
+                    <i class="bi bi-play-fill"></i> 恢复
+                </button>
+                <select id="concurrency-select" class="form-select form-select-sm" style="width: auto;">
+                    <option value="1">并行: 1</option>
+                    <option value="2">并行: 2</option>
+                    <option value="3" selected>并行: 3</option>
+                    <option value="5">并行: 5</option>
+                    <option value="10">并行: 10</option>
+                </select>
             </div>
         </div>
         <!-- 进度条 -->
@@ -224,77 +237,185 @@ function startCompare() {
     if (!configId) { showAlert('请先选择大模型', 'danger'); return; }
 
     var promptId = document.getElementById('prompt-select').value;
+    var concurrencyEl = document.getElementById('concurrency-select');
+    var concurrency = concurrencyEl ? parseInt(concurrencyEl.value) || 3 : 3;
 
     var progressDiv = document.getElementById('task-progress');
     var progressBar = document.getElementById('progress-bar');
     var progressText = document.getElementById('progress-text');
     progressDiv.classList.remove('d-none');
     progressBar.style.width = '0%';
+    progressBar.classList.add('progress-bar-animated');
     progressText.textContent = '正在对比...';
+
+    // 重置状态
+    _simAbortController = new AbortController();
+    _simProcessedIds = new Set();
+    _simAllItemIds = [];
+    _simState = 'running';
+    _simConfig = {
+        configId: configId,
+        promptId: promptId,
+        concurrency: concurrency
+    };
+
+    document.getElementById('btn-compare').disabled = true;
+    document.getElementById('btn-pause').classList.remove('d-none');
+    document.getElementById('btn-resume').classList.add('d-none');
+
+    _doCompare([]);
+}
+
+// 状态变量
+var _simAbortController = null;
+var _simProcessedIds = new Set();
+var _simAllItemIds = [];
+var _simState = 'idle';
+var _simConfig = {};
+
+function _doCompare(itemIds) {
+    var cfg = _simConfig;
+    _simAbortController = new AbortController();
+
+    var requestBody = {
+        task_id: TASK_ID,
+        config_id: parseInt(cfg.configId),
+        prompt_id: cfg.promptId ? parseInt(cfg.promptId) : null,
+        item_ids: itemIds,
+        concurrency: cfg.concurrency
+    };
+
+    var progressBar = document.getElementById('progress-bar');
+    var progressText = document.getElementById('progress-text');
 
     fetch('/api/similarity-compare-stream', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            task_id: TASK_ID,
-            config_id: parseInt(configId),
-            prompt_id: promptId ? parseInt(promptId) : null,
-            item_ids: [],
-        }),
+        body: JSON.stringify(requestBody),
+        signal: _simAbortController.signal
     }).then(function(response) {
+        if (!response.ok) {
+            response.text().then(function(text) {
+                showAlert('请求失败 (' + response.status + '): ' + text.substring(0, 200), 'danger');
+            }).catch(function() {
+                showAlert('请求失败: HTTP ' + response.status, 'danger');
+            });
+            _onCompareEnd();
+            return;
+        }
         var reader = response.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
 
         function processChunk(result) {
             if (result.done) {
-                progressText.textContent = '对比完成！';
-                progressBar.classList.remove('progress-bar-animated');
-                progressBar.style.width = '100%';
-                setTimeout(function() { location.reload(); }, 1500);
+                if (buffer.trim()) processLines(buffer);
                 return;
             }
-
             buffer += decoder.decode(result.value, {stream: true});
             var lines = buffer.split('\n');
             buffer = lines.pop();
-
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim();
-                if (line.startsWith('data: ')) {
-                    try {
-                        var data = JSON.parse(line.substring(6));
-                        if (data.error) {
-                            showAlert(data.error, 'danger');
-                            progressDiv.classList.add('d-none');
-                            return;
-                        }
-                        if (data.status === 'done') {
-                            progressText.textContent = data.message;
-                            progressBar.classList.remove('progress-bar-animated');
-                            progressBar.style.width = '100%';
-                            setTimeout(function() { location.reload(); }, 1500);
-                            return;
-                        }
-                        if (data.progress && data.total) {
-                            var pct = Math.round(data.progress / data.total * 100);
-                            progressBar.style.width = pct + '%';
-                            progressText.textContent = '对比中 ' + data.progress + '/' + data.total + '...';
-                        }
-                        if (data.status === 'ok' && data.data) {
-                            updateRow(data.item_id, data.data);
-                        }
-                    } catch(e) {}
-                }
-            }
-            return reader.read().then(processChunk);
+            processLines(lines.join('\n'));
+            return reader.read().then(processChunk).catch(handleError);
         }
 
-        return reader.read().then(processChunk);
+        function processLines(text) {
+            var lines = text.split('\n');
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    var data = JSON.parse(line.substring(6));
+                    if (data.error && !data.status) {
+                        showAlert(data.error, 'danger');
+                        _onCompareEnd();
+                        return;
+                    }
+                    if (data.status === 'init') {
+                        if (_simAllItemIds.length === 0) {
+                            _simAllItemIds = data.item_ids || [];
+                        }
+                        continue;
+                    }
+                    if (data.status === 'done') {
+                        progressText.textContent = data.message || '对比完成！';
+                        progressBar.classList.remove('progress-bar-animated');
+                        progressBar.style.width = '100%';
+                        _onCompareEnd();
+                        setTimeout(function() { location.reload(); }, 1500);
+                        return;
+                    }
+                    if (data.status === 'ok') {
+                        _simProcessedIds.add(data.item_id);
+                        if (data.data) updateRow(data.item_id, data.data);
+                    } else if (data.status === 'error') {
+                        _simProcessedIds.add(data.item_id);
+                        console.error('[相似度对比] 条目失败:', data.item_id, data.error);
+                    }
+                    // 更新进度
+                    var processed = _simProcessedIds.size;
+                    var total = _simAllItemIds.length || data.total || 1;
+                    var pct = Math.round(processed / total * 100);
+                    progressBar.style.width = pct + '%';
+                    progressText.textContent = '对比中 ' + processed + '/' + total + '...';
+                } catch(e) {
+                    console.error('[相似度对比] 解析失败:', e);
+                }
+            }
+        }
+
+        function handleError(err) {
+            if (err.name === 'AbortError') return; // 暂停导致的中断
+            document.getElementById('task-progress').classList.add('d-none');
+            showAlert('对比失败: ' + err.message, 'danger');
+            _onCompareEnd();
+        }
+
+        return reader.read().then(processChunk).catch(handleError);
     }).catch(function(err) {
-        progressDiv.classList.add('d-none');
+        if (err.name === 'AbortError') return;
+        document.getElementById('task-progress').classList.add('d-none');
         showAlert('对比失败: ' + err.message, 'danger');
+        _onCompareEnd();
     });
+}
+
+function _onCompareEnd() {
+    _simState = 'idle';
+    document.getElementById('btn-compare').disabled = false;
+    document.getElementById('btn-pause').classList.add('d-none');
+    document.getElementById('btn-resume').classList.add('d-none');
+}
+
+function pauseCompare() {
+    if (_simState !== 'running') return;
+    _simState = 'paused';
+    if (_simAbortController) _simAbortController.abort();
+
+    document.getElementById('btn-pause').classList.add('d-none');
+    document.getElementById('btn-resume').classList.remove('d-none');
+
+    var processed = _simProcessedIds.size;
+    var total = _simAllItemIds.length || '?';
+    document.getElementById('progress-text').textContent = '已暂停 (' + processed + '/' + total + ')';
+    document.getElementById('progress-bar').classList.remove('progress-bar-animated');
+}
+
+function resumeCompare() {
+    if (_simState !== 'paused') return;
+    _simState = 'running';
+
+    document.getElementById('btn-resume').classList.add('d-none');
+    document.getElementById('btn-pause').classList.remove('d-none');
+    document.getElementById('progress-bar').classList.add('progress-bar-animated');
+
+    var remaining = _simAllItemIds.filter(function(id) { return !_simProcessedIds.has(id); });
+    if (remaining.length === 0) {
+        _onCompareEnd();
+        location.reload();
+        return;
+    }
+    _doCompare(remaining);
 }
 
 function updateRow(itemId, data) {

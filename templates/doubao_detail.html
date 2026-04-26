@@ -76,14 +76,19 @@
         <h5><i class="bi bi-tools"></i> 查询操作</h5>
     </div>
     <div class="card-body">
-        <div class="row g-3">
+        <div class="row g-3 align-items-center">
             <div class="col-md-8">
-                <label class="form-label">豆包 Cookie</label>
-                <textarea id="cookie-input" class="form-control" rows="3" 
-                          placeholder="粘贴豆包 Cookie（留空则使用上传时保存的 Cookie）">{{ task.cookie_config or '' }}</textarea>
+                <div id="auth-status-bar">
+                    {% if logged_in %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle"></i> 已登录豆包</span>
+                    {% else %}
+                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> 未登录</span>
+                    <span class="text-muted small ms-2">请先 <a href="/doubao">返回主页登录</a> 豆包</span>
+                    {% endif %}
+                </div>
             </div>
-            <div class="col-md-4 d-flex align-items-end">
-                <button class="btn btn-primary w-100" onclick="startQuery()">
+            <div class="col-md-4 d-flex justify-content-end">
+                <button class="btn btn-primary" onclick="startQuery()" id="query-btn" {% if not logged_in %}disabled{% endif %}>
                     <i class="bi bi-play-fill"></i> 开始查询
                 </button>
             </div>
@@ -149,21 +154,20 @@
 var TASK_ID = {{ task.id }};
 
 function startQuery() {
-    var cookieConfig = document.getElementById('cookie-input').value.trim();
-
     var progressDiv = document.getElementById('task-progress');
     var progressBar = document.getElementById('progress-bar');
     var progressText = document.getElementById('progress-text');
+    var queryBtn = document.getElementById('query-btn');
     progressDiv.classList.remove('d-none');
     progressBar.style.width = '0%';
     progressText.textContent = '正在初始化浏览器...';
+    queryBtn.disabled = true;
 
     fetch('/api/doubao-query-stream', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
             task_id: TASK_ID,
-            cookie_config: cookieConfig,
             item_ids: [],
         }),
     }).then(function(response) {
@@ -176,6 +180,7 @@ function startQuery() {
                 progressText.textContent = '查询完成！';
                 progressBar.classList.remove('progress-bar-animated');
                 progressBar.style.width = '100%';
+                queryBtn.disabled = false;
                 setTimeout(function() { location.reload(); }, 1500);
                 return;
             }
@@ -192,12 +197,21 @@ function startQuery() {
                         if (data.error) {
                             showAlert(data.error, 'danger');
                             progressDiv.classList.add('d-none');
+                            queryBtn.disabled = false;
+                            return;
+                        }
+                        if (data.status === 'session_expired') {
+                            showAlert(data.error || '豆包登录已过期，请重新登录', 'warning');
+                            progressDiv.classList.add('d-none');
+                            queryBtn.disabled = false;
+                            updateAuthBar(false);
                             return;
                         }
                         if (data.status === 'done') {
                             progressText.textContent = data.message;
                             progressBar.classList.remove('progress-bar-animated');
                             progressBar.style.width = '100%';
+                            queryBtn.disabled = false;
                             setTimeout(function() { location.reload(); }, 1500);
                             return;
                         }
@@ -220,8 +234,22 @@ function startQuery() {
         return reader.read().then(processChunk);
     }).catch(function(err) {
         progressDiv.classList.add('d-none');
+        queryBtn.disabled = false;
         showAlert('查询失败: ' + err.message, 'danger');
     });
+}
+
+function updateAuthBar(loggedIn) {
+    var bar = document.getElementById('auth-status-bar');
+    var btn = document.getElementById('query-btn');
+    if (loggedIn) {
+        bar.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> 已登录豆包</span>';
+        btn.disabled = false;
+    } else {
+        bar.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> 未登录</span>' +
+            '<span class="text-muted small ms-2">请先 <a href="/doubao">返回主页登录</a> 豆包</span>';
+        btn.disabled = true;
+    }
 }
 
 function updateRow(itemId, answer, status) {

@@ -7,79 +7,32 @@ logger = logging.getLogger(__name__)
 
 
 class DoubaoBrowser:
-    """通过 Playwright 自动化控制浏览器与豆包网页版交互"""
+    """通过 Playwright 持久化上下文与豆包网页版交互"""
 
     DOUBAO_URL = "https://www.doubao.com"
 
-    def __init__(self, cookies_str):
+    def __init__(self, auth_manager):
         """
-        初始化浏览器并注入 Cookies
+        使用 DoubaoAuthManager 的持久化 profile 初始化浏览器
 
         Args:
-            cookies_str: 从浏览器开发者工具复制的 Cookie 字符串
-                        格式如: "key1=value1; key2=value2; ..."
+            auth_manager: DoubaoAuthManager 实例，提供 user_data_dir 和锁管理
         """
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        cookies = self._parse_cookies(cookies_str)
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-        )
-        # 尝试批量添加 cookies，如果失败则逐个添加
-        if cookies:
-            try:
-                self._context.add_cookies(cookies)
-            except Exception as e:
-                logger.warning(f"批量添加 Cookie 失败: {str(e)}，尝试逐个添加...")
-                for cookie in cookies:
-                    try:
-                        self._context.add_cookies([cookie])
-                    except Exception as ce:
-                        logger.warning(f"跳过无效 Cookie: {cookie['name']} - {str(ce)}")
-        self._page = self._context.new_page()
+        self._auth_manager = auth_manager
+        auth_manager.acquire_for_query()
 
-    @staticmethod
-    def _parse_cookies(cookies_str):
-        """解析 Cookie 字符串为 Playwright 需要的格式"""
-        cookies = []
-        if not cookies_str:
-            return cookies
-
-        # 清理前缀：去掉可能的 "cookie:" 或 "Cookie:" 前缀
-        cleaned = cookies_str.strip()
-        if cleaned.lower().startswith('cookie:'):
-            cleaned = cleaned[7:].strip()
-        elif cleaned.lower().startswith('cookie\n'):
-            cleaned = cleaned[6:].strip()
-        elif cleaned.lower().startswith('cookie '):
-            cleaned = cleaned[6:].strip()
-
-        for pair in cleaned.split(';'):
-            pair = pair.strip()
-            if '=' not in pair:
-                continue
-            name, value = pair.split('=', 1)
-            name = name.strip()
-            value = value.strip()
-
-            # 跳过空名称的 cookie
-            if not name:
-                continue
-
-            # 跳过名称中包含非法字符的 cookie（只允许 ASCII 可打印字符，不含空格、分号、等号等）
-            if any(c in name for c in [' ', '\t', '\n', '\r', ';', ',']):
-                logger.warning(f"跳过无效 Cookie（名称含非法字符）: {name[:20]}")
-                continue
-
-            cookies.append({
-                'name': name,
-                'value': value,
-                'domain': '.doubao.com',
-                'path': '/',
-            })
-
-        return cookies
+        try:
+            self._playwright = sync_playwright().start()
+            self._context = self._playwright.chromium.launch_persistent_context(
+                auth_manager.get_user_data_dir(),
+                headless=True,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+        except Exception:
+            auth_manager.release_from_query()
+            raise
 
     def query(self, question, timeout=120):
         """
@@ -119,7 +72,7 @@ class DoubaoBrowser:
                     continue
 
             if not input_el:
-                raise Exception("无法找到豆包输入框，请检查 Cookie 是否有效或页面是否正常加载")
+                raise Exception("无法找到豆包输入框，登录可能已过期，请重新登录")
 
             # 尝试点击"新建对话"按钮（如果存在），确保每次是新对话
             try:
@@ -258,13 +211,11 @@ class DoubaoBrowser:
     def close(self):
         """关闭浏览器资源"""
         try:
-            if self._page:
-                self._page.close()
             if self._context:
                 self._context.close()
-            if self._browser:
-                self._browser.close()
             if self._playwright:
                 self._playwright.stop()
         except Exception as e:
             logger.error(f"关闭浏览器资源时出错: {str(e)}")
+        finally:
+            self._auth_manager.release_from_query()
