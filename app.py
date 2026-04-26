@@ -2,9 +2,14 @@
 import os
 import json
 import uuid
+import logging
 import traceback
 import requests as req_lib
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 from werkzeug.utils import secure_filename
 
 from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DATABASE_URI
@@ -326,28 +331,36 @@ def delete_corpus(file_id):
 def classify_items_stream():
     """流式分类语料（每处理一行就返回结果）"""
     from flask import Response, stream_with_context
-    import json
+
+    # 在生成器外读取请求数据，避免请求上下文问题
+    data = request.get_json(force=True, silent=True) or {}
+    file_id = data.get('file_id')
+    config_id = data.get('config_id')
+    classify_type = data.get('classify_type')
+    classify_types = data.get('classify_types', [])
+    categories = data.get('categories', '')
+    prompt_id = data.get('prompt_id')
+    item_ids = data.get('item_ids', [])
+
+    logger.info(f"[分类流] 开始: classify_type={classify_type}, classify_types={classify_types}, "
+                f"config_id={config_id}, prompt_id={prompt_id}, file_id={file_id}, item_ids数量={len(item_ids)}")
 
     def generate():
-        data = request.json
-        file_id = data.get('file_id')
-        config_id = data.get('config_id')
-        classify_type = data.get('classify_type')
-        classify_types = data.get('classify_types', [])
-        categories = data.get('categories', '')
-        prompt_id = data.get('prompt_id')
-        item_ids = data.get('item_ids', [])
-
+      try:
         llm = get_llm_service(config_id)
         if not llm:
+            logger.error("[分类流] 未找到模型配置")
             yield f"data: {json.dumps({'error': '请先配置大模型'})}\n\n"
             return
+
+        logger.info(f"[分类流] 使用模型: {llm.model}")
 
         custom_prompt = None
         if prompt_id:
             tpl = PromptTemplate.query.get(prompt_id)
             if tpl:
                 custom_prompt = tpl.content
+                logger.info(f"[分类流] 使用自定义 Prompt: {tpl.name} (type={tpl.prompt_type})")
 
         if item_ids:
             items = CorpusItem.query.filter(CorpusItem.id.in_(item_ids)).all()
@@ -355,18 +368,76 @@ def classify_items_stream():
             items = CorpusItem.query.filter_by(file_id=file_id).all()
 
         total = len(items)
+        logger.info(f"[分类流] 待处理条目: {total} 条")
+
+        if total == 0:
+            yield f"data: {json.dumps({'error': '没有找到待处理的条目'})}\n\n"
+            return
+
         for i, item in enumerate(items, 1):
             try:
+                logger.info(f"[分类流] 处理第 {i}/{total} 条 (item_id={item.id}): {item.question[:50]}...")
+                res = {}
+
                 if classify_type == 'combined':
                     res = classify_combined(llm, item.question, categories, custom_prompt)
                     _apply_combined_result(item, res, classify_types, categories)
-                    db.session.commit()
-                    yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': res})}\n\n"
+
+                elif classify_type == 'subj_obj':
+                    res = classify_subjective_objective(llm, item.question, custom_prompt)
+                    item.subj_obj = res.get('type', '')
+                    if item.subj_obj == 'objective':
+                        try:
+                            ans_res = generate_objective_answer(llm, item.question)
+                            item.objective_answer = ans_res.get('answer', '')
+                        except Exception:
+                            pass
+
+                elif classify_type == 'difficulty':
+                    res = classify_difficulty(llm, item.question, custom_prompt)
+                    item.difficulty = res.get('difficulty', '')
+
+                elif classify_type == 'category':
+                    res = classify_category(llm, item.question, categories, custom_prompt)
+                    item.category = res.get('category', '')
+
+                elif classify_type == 'quality':
+                    res = evaluate_quality(llm, item.question, custom_prompt)
+                    item.quality_score = float(res.get('quality_score', 0))
+                    item.quality_label = res.get('quality_label', '')
+                    item.quality_detail = json.dumps(res, ensure_ascii=False)
+
+                elif classify_type == 'domain':
+                    res = classify_domain(llm, item.question, custom_prompt)
+                    item.domain = res.get('domain', '')
+                    item.sub_domain = res.get('sub_domain', '')
+
+                elif classify_type == 'intent':
+                    res = classify_intent(llm, item.question, custom_prompt)
+                    item.intent = res.get('intent', '')
+                    item.intent_cn = res.get('intent_cn', '')
+                    item.intent_confidence = float(res.get('confidence', 0))
+
                 else:
-                    # 其他分类类型保持原有逻辑（简化处理）
-                    yield f"data: {json.dumps({'status': 'skip', 'item_id': item.id, 'progress': i, 'total': total})}\n\n"
+                    logger.warning(f"[分类流] 未知的分类类型: {classify_type}")
+                    yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': f'未知分类类型: {classify_type}', 'progress': i, 'total': total})}\n\n"
+                    continue
+
+                db.session.commit()
+                logger.info(f"[分类流] 第 {i}/{total} 条处理成功")
+                yield f"data: {json.dumps({'status': 'ok', 'item_id': item.id, 'progress': i, 'total': total, 'data': res})}\n\n"
+
             except Exception as e:
+                db.session.rollback()
+                logger.error(f"[分类流] 第 {i}/{total} 条处理失败 (item_id={item.id}): {str(e)}")
+                logger.error(traceback.format_exc())
                 yield f"data: {json.dumps({'status': 'error', 'item_id': item.id, 'error': str(e), 'progress': i, 'total': total})}\n\n"
+
+        yield f"data: {json.dumps({'status': 'done', 'message': f'分类完成，共 {total} 条'})}\n\n"
+      except Exception as outer_err:
+        logger.error(f"[分类流] 生成器异常: {str(outer_err)}")
+        logger.error(traceback.format_exc())
+        yield f"data: {json.dumps({'error': f'分类异常: {str(outer_err)}'})}\n\n"
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 

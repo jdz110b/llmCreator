@@ -1,7 +1,11 @@
 """大模型服务：支持 OpenAI 兼容 API 的灵活接入"""
 import json
+import logging
 import re
+import time
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
@@ -54,12 +58,51 @@ class LLMService:
             'max_tokens': max_tokens,
         }
 
-        resp = self.session.post(url, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
+        # 构造用于日志的请求摘要（隐藏 API Key，截断过长的 prompt）
+        def _log_payload():
+            user_preview = user_prompt[:300] + '...' if len(user_prompt) > 300 else user_prompt
+            return (f"URL={url}, 模型={self.model}, temperature={temperature}, "
+                    f"max_tokens={max_tokens}, prompt(前300字符)={user_preview}")
+
+        logger.info(f"[LLM请求] {_log_payload()}")
+        start_time = time.time()
+
+        try:
+            resp = self.session.post(url, headers=headers, json=payload, timeout=120)
+        except requests.exceptions.Timeout:
+            elapsed = time.time() - start_time
+            logger.error(f"[LLM超时] 请求超时({elapsed:.1f}s)，{_log_payload()}")
+            raise ValueError(
+                f"大模型 API 请求超时(>{elapsed:.0f}s)，模型: {self.model}，"
+                f"请检查网络连接或尝试减少输入长度"
+            )
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[LLM连接失败] {str(e)}，{_log_payload()}")
+            raise ValueError(
+                f"无法连接到大模型 API ({url})，模型: {self.model}，错误: {str(e)}"
+            )
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[LLM请求异常] {type(e).__name__}: {str(e)}，{_log_payload()}")
+            raise ValueError(
+                f"大模型 API 请求失败，模型: {self.model}，"
+                f"错误: {type(e).__name__}: {str(e)}"
+            )
+
+        elapsed = time.time() - start_time
+        logger.info(f"[LLM响应] HTTP {resp.status_code}, 耗时={elapsed:.1f}s, 模型={self.model}")
+
+        # HTTP 错误状态码
+        if resp.status_code != 200:
+            body_preview = resp.text[:500] if resp.text else '(空)'
+            logger.error(f"[LLM HTTP错误] 状态码={resp.status_code}, 响应={body_preview}，{_log_payload()}")
+            raise ValueError(
+                f"大模型 API 返回 HTTP {resp.status_code}，模型: {self.model}，响应: {body_preview}"
+            )
 
         # 防御性处理：API 可能返回空响应体
         raw_text = resp.text.strip()
         if not raw_text:
+            logger.error(f"[LLM空响应] HTTP {resp.status_code}, 响应体为空，{_log_payload()}")
             raise ValueError(
                 f"大模型 API 返回空响应体 (HTTP {resp.status_code})，"
                 f"模型: {self.model}，请检查 API 地址和模型名称是否正确"
@@ -69,6 +112,7 @@ class LLMService:
             data = resp.json()
         except (json.JSONDecodeError, ValueError) as e:
             preview = raw_text[:500] if len(raw_text) > 500 else raw_text
+            logger.error(f"[LLM JSON解析失败] 响应={preview}，{_log_payload()}")
             raise ValueError(
                 f"大模型 API 返回非 JSON 内容 (HTTP {resp.status_code})，"
                 f"模型: {self.model}，响应内容: {preview}"
@@ -79,15 +123,41 @@ class LLMService:
             err_msg = data['error']
             if isinstance(err_msg, dict):
                 err_msg = err_msg.get('message', str(err_msg))
+            logger.error(f"[LLM API错误] {err_msg}，{_log_payload()}")
             raise ValueError(f"大模型 API 返回错误: {err_msg}")
 
         if not data.get('choices'):
+            resp_preview = json.dumps(data, ensure_ascii=False)[:500]
+            logger.error(f"[LLM无choices] 响应={resp_preview}，{_log_payload()}")
             raise ValueError(
                 f"大模型 API 返回中缺少 choices 字段，"
-                f"模型: {self.model}，响应: {json.dumps(data, ensure_ascii=False)[:500]}"
+                f"模型: {self.model}，响应: {resp_preview}"
             )
 
-        content = data['choices'][0]['message']['content']
+        message = data['choices'][0]['message']
+        content = message.get('content') or ''
+
+        # DeepSeek 等模型可能将内容放在 reasoning_content 字段，content 为 None
+        if not content.strip():
+            reasoning = message.get('reasoning_content') or ''
+            if reasoning.strip():
+                content = reasoning
+                logger.info(f"[LLM] content 为空，使用 reasoning_content (长度={len(reasoning)})")
+
+        # 检查是否因触发内容过滤而返回空
+        if not content.strip():
+            finish_reason = data['choices'][0].get('finish_reason', '')
+            logger.error(
+                f"[LLM空内容] finish_reason={finish_reason}, "
+                f"message字段={list(message.keys())}，{_log_payload()}"
+            )
+            raise ValueError(
+                f"大模型返回了空的回复内容，模型: {self.model}，"
+                f"finish_reason: {finish_reason}，"
+                f"可能原因：内容被安全过滤、max_tokens 不足、或模型名称不正确"
+            )
+
+        logger.info(f"[LLM成功] 模型={self.model}, 耗时={elapsed:.1f}s, 回复长度={len(content)}")
         return content
 
     def chat_json(self, system_prompt, user_prompt, temperature=0.1, max_tokens=2000):
