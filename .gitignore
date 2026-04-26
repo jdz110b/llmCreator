@@ -6,3 +6,11 @@ uploads/
 *.xlsx
 ~$*
 .env
+
+# Debug files
+debug_*.png
+nul
+
+# Test scripts with credentials
+test_debug*.py
+test_query.py
