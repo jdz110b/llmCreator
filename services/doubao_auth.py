@@ -78,14 +78,18 @@ class DoubaoAuthManager:
         try:
             from playwright.sync_api import sync_playwright
 
+            from services.browser_utils import get_browser_launch_args
+
             self._login_playwright = sync_playwright().start()
             os.makedirs(self._user_data_dir, exist_ok=True)
 
+            browser_args = get_browser_launch_args(self._login_playwright)
             self._login_context = self._login_playwright.chromium.launch_persistent_context(
                 self._user_data_dir,
                 headless=False,
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                **browser_args,
             )
 
             page = self._login_context.pages[0] if self._login_context.pages else self._login_context.new_page()

@@ -2,6 +2,7 @@
 import time
 import logging
 from playwright.sync_api import sync_playwright
+from services.browser_utils import get_browser_launch_args
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,13 @@ class DoubaoBrowser:
 
         try:
             self._playwright = sync_playwright().start()
+            browser_args = get_browser_launch_args(self._playwright)
             self._context = self._playwright.chromium.launch_persistent_context(
                 auth_manager.get_user_data_dir(),
                 headless=True,
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 800},
+                **browser_args,
             )
             self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
         except Exception:
